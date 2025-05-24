@@ -1,6 +1,8 @@
 # PerfXAgent客户端应用程序
 
 ## 项目简介
+首先我想说“这个项目可能没有如何意义”，也可能有一些意义。我可能会写完，也可能永远完成不了。纯属好玩而已。
+
 这是一个PC端的应用程序，与PerfXAgent云服务器连接。PerfXAgent支持Chatbot, 会议记录，翻译等Agent功能，并具有完整的h5界面。PC端被用于通过语音和文本与PerfXAgent进行交流了连接。
 
 例如"本机的ChatBot交互逻辑"
@@ -10,6 +12,9 @@ PerfXAgent侦听并接收到PerfXAgent服务器WebSocket音频流-->OPUS解压�
 ## 一个有趣的故事
 我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈，因为你不需要再花时间去复习代码的编程规范，同时也不需要去自己update的最新的知识。所以，我想尝试用一个全新的方式"写"项目，试图不写"一行"实际代码。
 更多故事，参考这里：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY.md
+这是第一个界面（2025/5/24)
+<img width="793" alt="image" src="https://github.com/user-attachments/assets/fe15c85c-bfa2-415a-8c99-3c26d7ab20ab" />
+
 
 ## 主要功能
 1. PC端音频采集
