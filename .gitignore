@@ -1,0 +1,36 @@
+# Build directory
+build/
+
+# IDE files
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+*.swp
+*~
+
+# Temporary files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Qt generated files
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.moc
+*_autogen/
+
+# Audio recordings
+recordings/ 
