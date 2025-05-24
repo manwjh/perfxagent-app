@@ -7,6 +7,10 @@
 PerfXAgent采集本机的Mic PCM流-->音频降噪等前处理-->OPUS压缩-->WebSocket发送-->服务器
 PerfXAgent侦听并接收到PerfXAgent服务器WebSocket音频流-->OPUS解压缩-->PCM传输给PC喇叭驱动
 
+## 一个有趣的故事
+我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈，因为你不需要再花时间去复习代码的编程规范，同时也不需要去自己update的最新的知识。所以，我想尝试用一个全新的方式"写"项目，试图不写"一行"实际代码。
+更多故事，参考这里：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY.md
+
 ## 主要功能
 1. PC端音频采集
    - 支持获取PC麦克风音频输入
