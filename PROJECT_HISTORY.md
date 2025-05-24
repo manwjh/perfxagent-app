@@ -16,6 +16,7 @@
 
 【2025/5/24 22:47】
 程序在我的macbook上可以基本运行，先试试如何上传到github上去。方便我能找到和大模型一起潦潦草草搭建的项目。到目前为止，我没有写过一行代码。
+<img width="796" alt="image" src="https://github.com/user-attachments/assets/f05e8cd3-91df-4f98-ac51-8e7ae166d692" />
 
 我：我打算上传这个项目到我的git站点   https://github.com/manwjh/perfxagent-app
 
