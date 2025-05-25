@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/audio_device.h"
 #include <string>
 #include <vector>
 #include <mutex>
@@ -13,16 +14,6 @@ enum class AudioDeviceType {
     INPUT,      // 输入设备（麦克风）
     OUTPUT,     // 输出设备（扬声器）
     BOTH        // 输入输出设备
-};
-
-// 音频设备信息
-struct AudioDeviceInfo {
-    int id;                     // 设备ID
-    std::string name;           // 设备名称
-    AudioDeviceType type;       // 设备类型
-    int maxChannels;            // 最大通道数
-    std::vector<int> sampleRates; // 支持的采样率列表
-    bool isDefault;             // 是否为默认设备
 };
 
 // 音频格式

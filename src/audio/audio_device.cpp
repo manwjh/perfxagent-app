@@ -1,6 +1,8 @@
 #include "audio/audio_device.h"
 #include <iostream>
 
+namespace perfx {
+
 AudioDevice::AudioDevice() 
     : stream_(nullptr)
     , sampleRate_(16000)
@@ -163,4 +165,6 @@ void AudioDevice::setSampleRate(int rate) {
 
 int AudioDevice::getSampleRate() const {
     return sampleRate_;
-} 
+}
+
+} // namespace perfx 

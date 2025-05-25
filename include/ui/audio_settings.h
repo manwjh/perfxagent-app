@@ -3,22 +3,21 @@
 #include <QWidget>
 #include <QComboBox>
 #include <QPushButton>
-#include <QLabel>
-#include <QGroupBox>
-#include <QVBoxLayout>
-#include <QPainter>
-#include <QPainterPath>
 #include <QTimer>
+#include <vector>
 #include "audio/audio_device.h"
-#include "audio_settings.h"
+
+namespace perfx {
+namespace ui {
 
 class AudioWaveformWidget : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY(AudioWaveformWidget)
 public:
     explicit AudioWaveformWidget(QWidget* parent = nullptr);
     void updateWaveform(const std::vector<float>& data);
     void setSampleRate(int sampleRate, int channels);
-    void setPlaybackMode(bool isPlayback) { isPlayback_ = isPlayback; }
+    void setPlaybackMode(bool isPlayback);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -26,17 +25,18 @@ protected:
 
 private:
     std::vector<float> waveformData_;
-    int sampleRate_ = 16000;  // 默认采样率
-    int channels_ = 1;        // 默认通道数
-    bool isPlayback_ = false;
-    QTimer* animationTimer_;
+    int sampleRate_ = 48000;
+    int channels_ = 1;
     float ripplePhase_ = 0.0f;
-    static constexpr float RIPPLE_SPEED = 0.1f;
+    bool isPlaybackMode_ = false;
+    QTimer* animationTimer_ = nullptr;
     static constexpr int RIPPLE_COUNT = 3;
+    static constexpr float RIPPLE_SPEED = 0.02f;
 };
 
 class AudioSettingsWidget : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY(AudioSettingsWidget)
 public:
     explicit AudioSettingsWidget(QWidget* parent = nullptr);
     ~AudioSettingsWidget();
@@ -56,16 +56,19 @@ private slots:
 
 private:
     void initUI();
+    void initializeAudioDevice();
     void updateDeviceList();
     void updateButtonState(bool isRecording, bool isPlaying);
-    void initializeAudioDevice();
 
-    QComboBox* deviceCombo_;
-    QComboBox* sampleRateCombo_;
-    QPushButton* testButton_;
-    AudioWaveformWidget* waveformWidget_;
-    AudioDevice audioDevice_;
+    QComboBox* deviceCombo_ = nullptr;
+    QComboBox* sampleRateCombo_ = nullptr;
+    QPushButton* testButton_ = nullptr;
+    AudioWaveformWidget* waveformWidget_ = nullptr;
+    bool isRecording_ = false;
+    bool isPlaying_ = false;
     std::vector<float> recordedAudio_;
-    bool isRecording_;
-    bool isPlaying_;
-}; 
+    perfx::AudioDevice audioDevice_;
+};
+
+} // namespace ui
+} // namespace perfx 

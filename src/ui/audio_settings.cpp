@@ -1,4 +1,4 @@
-#include "audio_settings.h"
+#include "ui/audio_settings.h"
 #include "audio/audio_config.h"
 #include <cmath>
 #include <QTimer>
@@ -6,6 +6,18 @@
 #include <QPainter>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
+#include <sys/stat.h>
+#include <QVBoxLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include "audio/audio_device.h"
+#include <QHBoxLayout>
+#include <QMessageBox>
+#include <QDebug>
+
+namespace perfx {
+namespace ui {
 
 AudioWaveformWidget::AudioWaveformWidget(QWidget* parent) : QWidget(parent) {
     setMinimumHeight(50);
@@ -57,6 +69,10 @@ void AudioWaveformWidget::updateWaveform(const std::vector<float>& data) {
 void AudioWaveformWidget::setSampleRate(int sampleRate, int channels) {
     sampleRate_ = sampleRate;
     channels_ = channels;
+}
+
+void AudioWaveformWidget::setPlaybackMode(bool isPlayback) {
+    // ... 原有实现 ...
 }
 
 void AudioWaveformWidget::paintEvent(QPaintEvent* event) {
@@ -123,6 +139,7 @@ AudioSettingsWidget::AudioSettingsWidget(QWidget* parent)
     , isRecording_(false)
     , isPlaying_(false) {
     initUI();
+    initializeAudioDevice();
 }
 
 AudioSettingsWidget::~AudioSettingsWidget() {
@@ -195,9 +212,6 @@ void AudioSettingsWidget::initUI() {
     
     // 初始化按钮状态
     updateButtonState(false, false);
-
-    // 初始化音频设备参数
-    initializeAudioDevice();
 }
 
 void AudioSettingsWidget::initializeAudioDevice() {
@@ -375,7 +389,20 @@ void AudioSettingsWidget::stopTestRecording() {
                 // 仅在 DEBUG 模式下保存录音数据到临时文件
                 const bool DEBUG = true;
                 if (DEBUG) {
-                    std::string tempFile = "recordings/recording.wav";
+                    // 使用跨平台路径
+                    #ifdef _WIN32
+                        std::string tempFile = "recordings\\recording.wav";
+                    #else
+                        std::string tempFile = "recordings/recording.wav";
+                    #endif
+
+                    // 确保目录存在
+                    #ifdef _WIN32
+                        std::filesystem::create_directories("recordings");
+                    #else
+                        mkdir("recordings", 0755);
+                    #endif
+
                     std::ofstream outFile(tempFile, std::ios::binary);
                     if (outFile.is_open()) {
                         // 使用全局配置获取音频参数
@@ -516,4 +543,7 @@ void AudioSettingsWidget::onAudioData(const float* data, int frames) {
     } catch (const std::exception& e) {
         std::cerr << "处理音频数据失败: " << e.what() << std::endl;
     }
-} 
+}
+
+} // namespace ui
+} // namespace perfx 
