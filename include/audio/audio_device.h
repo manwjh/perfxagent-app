@@ -6,6 +6,8 @@
 #include <functional>
 #include <memory>
 
+namespace perfx {
+
 struct AudioDeviceInfo {
     int id;
     std::string name;
@@ -53,4 +55,6 @@ private:
     int sampleRate_;
     int channels_;
     bool isRecording_;
-}; 
+};
+
+} // namespace perfx 
