@@ -29,3 +29,8 @@ cursor: 好的，我来帮你准备上传代码到 GitHub 仓库。首先我们�
 <img width="1508" alt="image" src="https://github.com/user-attachments/assets/940993b6-c00f-4d99-ae33-c1c5ef588cdd" />
 也正常。以前我们自己手搓一个项目，写到后面，整个项目自己看到都想吐。恨不得重构，可以太过于“精巧”和“庞大”了，最终就是修修补补又一年。
 
+【2025/5/25 10:18】
+哈哈哈，终于fix了各种东西，并且将代码风格，目录结构也规整了一下。又一个界面写好了，至少初始化可以，能不能跑，周一就知道了。
+<img width="792" alt="image" src="https://github.com/user-attachments/assets/d7c3c94a-f133-4258-8f12-db3c23251957" />
+
+
