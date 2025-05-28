@@ -1,49 +1,30 @@
 # PerfXAgent客户端应用程序
 
+## 前言
+- 这个项目起念是我想探索一下大模型的自动代码编程能力，纯属为了好玩而已。
+- 我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈，因为不需要再花时间去复习代码的编程规范，同时也不需要去自己update的最新的知识。所以，我想尝试用一个全新的方式"写"项目，试图不写"一行"实际代码。更多故事，参考这里：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY.md
+
 ## 项目简介
-首先我想说“这个项目可能没有如何意义”，也可能有一些意义。我可能会写完，也可能永远完成不了。纯属好玩而已。
+- PerfXAgent Cloud简介
+该平台由澎峰长沙开发，目的是打造一个驱动各类硬件平台（电脑/手机/嵌入式）Agent云，你的硬件只要能支持Websocket通讯，用很少代码就能通过PerfXAgent获得丰富的、强大智能体灵魂。
 
-这是一个PC端的应用程序，与PerfXAgent云服务器连接。PerfXAgent支持Chatbot, 会议记录，翻译等Agent功能，并具有完整的h5界面。PC端被用于通过语音和文本与PerfXAgent进行交流了连接。
+PerfXAgent Cloud设计的理念是，将多模态MaaS接入，Agent这些功能全部放到云端。让App变成只是一个交互终端，App重点关注如何优化听觉，视觉，声音，界面这些和物理世界的交互方式，灵魂在云端。这可能会带来类似数据隐私、通讯延时等问题，不一定能覆盖所有场景，也没这个必要。
 
-例如"本机的ChatBot交互逻辑"
-PerfXAgent采集本机的Mic PCM流-->音频降噪等前处理-->OPUS压缩-->WebSocket发送-->服务器
-PerfXAgent侦听并接收到PerfXAgent服务器WebSocket音频流-->OPUS解压缩-->PCM传输给PC喇叭驱动
+目前PerfXAgent已经支持的智能体：
+1. chatbot（兼容小智AI）
+2. 会议记录
+3. 更多智能体正在研发...
 
-## 一个有趣的故事
-我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈，因为你不需要再花时间去复习代码的编程规范，同时也不需要去自己update的最新的知识。所以，我想尝试用一个全新的方式"写"项目，试图不写"一行"实际代码。
-更多故事，参考这里：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY.md
-这是第一个界面（2025/5/24)
-<img width="793" alt="image" src="https://github.com/user-attachments/assets/fe15c85c-bfa2-415a-8c99-3c26d7ab20ab" />
-
+- PerfXAgent APP和PerfXAgent Cloud的关系
+1. PerfXAgent Cloud <--https/wss--> PerfXAgent App
+2. 本项目（即perfxagent-app）目的是搭建一个运行在PC平台上的示范程序，最开始是在macos系统上开发的。该项目将最终支持MAC OS，Android，鸿蒙，Linux环境。
+3. 是否可以连接更多类似PerfXAgent的服务器，可以讨论一下。
 
 ## 主要功能
-1. PC端音频采集
-   - 支持获取PC麦克风音频输入
-   - 实时音频数据采集和处理
-   - 流式音频传输
-   - 高级音频处理
-     * 降噪算法（Noise Reduction）
-     * 自动增益控制（AGC）
-     * 声纹识别（Voice Print Recognition）
-
-2. 服务器通信
-   - 基于WebSocket的实时双向通信
-   - 音频数据传输
-   - 服务器处理结果接收
-
-3. 音频播放功能
-   - 支持播放服务器实时传输的音频流
-   - 支持播放本地音频文件（MP3/WAV格式）
-   - 支持音频播放控制（播放、暂停、停止、音量调节）
-
-4. 用户界面
-   - 对话界面
-   - 音频设置界面
-   - 云端Agent界面
-
-5. H5页面集成
-   - 支持服务器H5页面在本地程序中的显示
-   - 本地程序与H5页面的交互
+1. 将本机作为一个智能设备绑定到用户在PerfXAgent Cloud的账号下。
+2. 通过与PerfXAgent Cloud的通讯实现一些Agent，例如：
+   - 音频到音频的ChatBot
+   - 会议记录助手。
 
 ## 技术架构
 
@@ -55,157 +36,120 @@ PerfXAgent侦听并接收到PerfXAgent服务器WebSocket音频流-->OPUS解压�
 - MediaRecorder API (音频采集)
 - WebAssembly (音频处理算法)
 
-### 音频处理
-1. 音频采集
-   - 采样率：24kHz
-   - 位深度：16bit
-   - 通道数：单声道
-   - 流式处理：实时采集和传输
-
-2. 音频处理算法
-   - 降噪处理
-     * 频谱减法降噪
-     * 自适应滤波降噪
-     * 深度学习降噪
-   - 自动增益控制（AGC）
-     * 动态范围压缩
-     * 电平自适应调节
-   - 声纹识别
-     * 声纹特征提取
-     * 声纹匹配算法
-     * 实时声纹验证
-
-3. 音频播放
-   - 支持格式：MP3, WAV, OPUS
-   - 实时音频流播放
-   - 本地音频文件播放
-   - 音频可视化
-
 ### 通信协议
 详细的WebSocket通信协议请参考 [websocket-protocol.md](./websocket-protocol.md)
 
-### 系统要求
-- 操作系统：Windows 10/11, macOS 10.15+
-- 内存：4GB以上
-- 存储空间：500MB以上可用空间
+## 系统要求
 
-## 开发环境搭建
-1. 安装Node.js (v16.0.0+)
-2. 安装项目依赖
-```bash
-npm install
+### Windows
+- Windows 10 或更高版本
+- Visual Studio 2019 或更高版本
+- CMake 3.16 或更高版本
+- Qt 6.2.0 或更高版本
+- PortAudio 19.7.0 或更高版本
+
+### macOS
+- macOS 10.15 (Catalina) 或更高版本
+- Xcode 12.0 或更高版本
+- CMake 3.16 或更高版本
+- Qt 6.2.0 或更高版本
+- PortAudio 19.7.0 或更高版本
+
+## 快速开始
+
+1. 克隆仓库
+   ```bash
+   git clone https://github.com/manwjh/perfxagent-app.git
+   cd perfxagent-app
+   ```
+
+2. 构建项目
+   - Windows: 参考 [Windows 构建说明](docs/windows_build.md)
+   - macOS: 参考 [macOS 构建说明](docs/macos_build.md)
+
+3. 运行程序
+   - Windows: `build/bin/Release/perfxagent-app.exe`
+   - macOS: `build/bin/perfxagent-app`
+
+## 使用说明
+
+### 音频录制
+
+1. 启动程序后，选择输入设备
+2. 配置音频参数（采样率、通道数、位深度）
+3. 按住录音按钮开始录音
+4. 松开按钮结束录音并自动播放
+
+### 设备配置
+
+1. 在设置界面选择输入/输出设备
+2. 配置设备参数
+3. 使用测试按钮验证设备
+4. 保存配置
+
+### VAD 设置
+
+1. 在设置界面调整 VAD 阈值
+2. 实时查看 VAD 状态
+3. 根据需要调整灵敏度
+
+## 文档
+
+- [音频设置说明](docs/audio_settings.md)
+- [Windows 构建说明](docs/windows_build.md)
+- [macOS 构建说明](docs/macos_build.md)
+
+## 常见问题
+
+### 音频设备问题
+
+- 确保已授予应用麦克风访问权限
+- 检查系统音频设置
+- 验证设备驱动是否正确安装
+
+### 构建问题
+
+- 确保所有依赖都已正确安装
+- 检查 CMake 配置
+- 验证 Qt 和 PortAudio 安装
+
+### 运行时问题
+
+- 检查日志文件
+- 验证系统权限
+- 确认设备连接状态
+
+## 开发
+
+### 项目结构
+
 ```
-3. 启动开发服务器
-```bash
-npm run dev
-```
-
-## 用户界面设计
-
-### 1. 登录界面
-#### 1.1 服务器连接
-- 自动与服务器建立WebSocket连接
-- 连接状态显示
-- 重连机制
-- 错误提示
-
-#### 1.2 用户授权（预留）
-- 用户登录表单
-- 授权状态显示
-- 记住登录状态选项
-
-### 2. 音频设置界面
-#### 2.1 音频源选择
-- 显示所有可用的音频输入设备
-- 支持实时切换音频源
-- 显示设备详细信息（采样率、通道数等）
-
-#### 2.2 音频参数配置
-- 采样率选择（默认16kHz）
-- 位深度设置
-- 通道数选择
-- 音频处理选项
-  * 降噪开关
-  * AGC开关
-  * 声纹识别开关
-
-#### 2.3 音频测试功能
-- 录音测试按钮
-- 实时音量显示
-- 录音回放功能
-- 音频波形可视化
-
-### 3. 服务器配置界面
-#### 3.1 服务器设置
-- WebSocket服务器URL配置
-- 连接参数设置
-- 协议版本选择
-- 连接测试功能
-
-### 4. 对话界面
-#### 4.1 实时对话功能
-- 对讲按钮（按住说话）
-- 录音状态显示
-- 实时音量指示
-- 音频处理状态显示
-
-#### 4.2 服务器交互
-- 等待服务器响应状态
-- 服务器返回音频播放
-- 对话历史记录
-- 错误提示和重试机制
-
-## 界面交互流程
-
-1. 启动流程
-```
-启动应用 -> 登录界面 -> 服务器连接 -> 音频设置 -> 对话界面
-```
-
-2. 音频设置流程
-```
-选择音频源 -> 配置参数 -> 测试录音 -> 确认设置
-```
-
-3. 对话流程
-```
-按住对讲按钮 -> 开始录音 -> 流式传输 -> 松开按钮 -> 等待响应 -> 播放回复
-```
-
-## 项目结构
-```
-project/
-├── src/
-│   ├── main/           # Electron主进程
-│   ├── renderer/       # 渲染进程
-│   ├── components/     # React组件
-│   │   ├── login/      # 登录界面组件
-│   │   ├── settings/   # 设置界面组件
-│   │   │   ├── audio/  # 音频设置
-│   │   │   └── server/ # 服务器设置
-│   │   └── chat/       # 对话界面组件
-│   ├── audio/          # 音频处理模块
-│   │   ├── recorder/   # 音频采集
-│   │   ├── player/     # 音频播放
-│   │   ├── processor/  # 音频处理
-│   │   │   ├── noise/  # 降噪算法
-│   │   │   ├── agc/    # 自动增益控制
-│   │   │   └── voice/  # 声纹识别
-│   │   └── stream/     # 流式处理
-│   └── utils/          # 工具函数
-├── public/             # 静态资源
-└── package.json        # 项目配置
+perfxagent-app/
+├── docs/           # 文档
+├── include/        # 头文件
+├── src/           # 源代码
+│   ├── audio/     # 音频处理
+│   ├── core/      # 核心功能
+│   └── ui/        # 用户界面
+├── tests/         # 测试
+└── CMakeLists.txt # 构建配置
 ```
 
-## 注意事项
-1. 首次使用需要授予麦克风和音频输出设备访问权限
-2. 确保网络连接稳定以保证WebSocket通信质量
-3. 建议使用耳机进行音频采集，避免回声
-4. 音频播放时注意音量控制，避免突然的大音量输出
-5. 流式音频处理需要较高的CPU资源，建议在性能较好的设备上运行
-6. 声纹识别功能需要预先采集用户声纹样本
-7. 界面切换时注意保存用户设置
-8. 确保音频设备切换时的平滑过渡
+### 构建系统
+
+- 使用 CMake 构建系统
+- 支持跨平台构建
+- 支持调试和发布配置
 
 ## 许可证
-MIT License 
+
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。
+
+## 联系方式
+
+- 项目主页：[GitHub](https://github.com/manwjh/perfxagent-app)
+- 问题反馈：[Issues](https://github.com/manwjh/perfxagent-app/issues)
