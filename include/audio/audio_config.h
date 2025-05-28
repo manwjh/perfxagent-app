@@ -1,92 +1,133 @@
 #pragma once
 
-#include "audio/audio_device.h"
-#include <string>
-#include <vector>
-#include <mutex>
-#include <functional>
-#include <memory>
+#include "audio/audio_device_info.h"
+#include <QString>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QFile>
 
 namespace perfx {
 
-// 音频设备类型
-enum class AudioDeviceType {
-    INPUT,      // 输入设备（麦克风）
-    OUTPUT,     // 输出设备（扬声器）
-    BOTH        // 输入输出设备
-};
-
-// 音频格式
-enum class AudioFormat {
-    PCM_16BIT,  // 16位PCM
-    PCM_24BIT,  // 24位PCM
-    PCM_32BIT,  // 32位PCM
-    FLOAT32     // 32位浮点
-};
-
-// 音频配置类
-class AudioConfig {
-public:
-    static AudioConfig& getInstance();
-
-    // 禁止拷贝和移动
-    AudioConfig(const AudioConfig&) = delete;
-    AudioConfig& operator=(const AudioConfig&) = delete;
-    AudioConfig(AudioConfig&&) = delete;
-    AudioConfig& operator=(AudioConfig&&) = delete;
-
+// 音频配置结构
+struct AudioConfig {
+    // 基础配置
+    int sampleRate = 16000;
+    int channels = 1;
+    AudioFormat format = AudioFormat::PCM_16BIT;
+    int bufferSize = 1024;
+    
     // 设备配置
-    void setInputDevice(int deviceId);
-    void setOutputDevice(int deviceId);
-    int getInputDevice() const;
-    int getOutputDevice() const;
-    std::vector<AudioDeviceInfo> getInputDevices() const;
-    std::vector<AudioDeviceInfo> getOutputDevices() const;
+    InputDeviceInfo inputDevice;
+    OutputDeviceInfo outputDevice;
+    
+    // 录音配置
+    QString recordingPath;  // 录音保存路径
+    bool autoStartRecording; // 是否自动开始录音
+    int maxRecordingDuration; // 最大录音时长（秒）
+    
+    // VAD配置
+    float vadThreshold = 0.5f;
 
-    // 音频参数配置
-    void setSampleRate(int rate);
-    void setChannels(int channels);
-    void setFormat(AudioFormat format);
-    void setBufferSize(int size);
-    int getSampleRate() const;
-    int getChannels() const;
-    AudioFormat getFormat() const;
-    int getBufferSize() const;
+    // 获取默认输入设备配置
+    static InputDeviceInfo getDefaultInputConfig() {
+        InputDeviceInfo info;
+        info.id = -1;
+        info.name = "Default Input";
+        info.maxChannels = 1;
+        info.defaultSampleRate = 16000;
+        info.sensitivity = 0.0;
+        info.signalToNoiseRatio = 0.0;
+        return info;
+    }
 
-    // 配置变更通知
-    using ConfigChangeCallback = std::function<void()>;
-    void addConfigChangeListener(ConfigChangeCallback callback);
-    void removeConfigChangeListener(ConfigChangeCallback callback);
+    // 获取默认输出设备配置
+    static OutputDeviceInfo getDefaultOutputConfig() {
+        OutputDeviceInfo info;
+        info.id = -1;
+        info.name = "Default Output";
+        info.maxChannels = 1;
+        info.defaultSampleRate = 16000;
+        info.maxVolume = 1.0;
+        info.impedance = 0.0;
+        return info;
+    }
 
-    // 配置验证
-    bool validateConfig() const;
-    std::string getLastError() const;
+    QJsonObject toJson() const {
+        QJsonObject obj;
+        // 基础配置
+        obj["sampleRate"] = sampleRate;
+        obj["channels"] = channels;
+        obj["format"] = static_cast<int>(format);
+        obj["bufferSize"] = bufferSize;
+        
+        // 输入设备配置
+        QJsonObject inputObj;
+        inputObj["id"] = inputDevice.id;
+        inputObj["name"] = QString::fromStdString(inputDevice.name);
+        inputObj["maxChannels"] = inputDevice.maxChannels;
+        inputObj["defaultSampleRate"] = inputDevice.defaultSampleRate;
+        inputObj["sensitivity"] = inputDevice.sensitivity;
+        inputObj["signalToNoiseRatio"] = inputDevice.signalToNoiseRatio;
+        obj["inputDevice"] = inputObj;
 
-private:
-    AudioConfig();
-    ~AudioConfig() = default;
+        // 输出设备配置
+        QJsonObject outputObj;
+        outputObj["id"] = outputDevice.id;
+        outputObj["name"] = QString::fromStdString(outputDevice.name);
+        outputObj["maxChannels"] = outputDevice.maxChannels;
+        outputObj["defaultSampleRate"] = outputDevice.defaultSampleRate;
+        outputObj["maxVolume"] = outputDevice.maxVolume;
+        outputObj["impedance"] = outputDevice.impedance;
+        obj["outputDevice"] = outputObj;
 
-    void notifyConfigChanged();
-    bool updateDeviceInfo();
+        // 录音配置
+        obj["recordingPath"] = recordingPath;
+        obj["autoStartRecording"] = autoStartRecording;
+        obj["maxRecordingDuration"] = maxRecordingDuration;
+        
+        // VAD配置
+        obj["vadThreshold"] = vadThreshold;
+        
+        return obj;
+    }
 
-    // 设备配置
-    int inputDeviceId_;
-    int outputDeviceId_;
-    std::vector<AudioDeviceInfo> inputDevices_;
-    std::vector<AudioDeviceInfo> outputDevices_;
+    void fromJson(const QJsonObject& obj) {
+        // 基础配置
+        sampleRate = obj["sampleRate"].toInt();
+        channels = obj["channels"].toInt();
+        format = static_cast<AudioFormat>(obj["format"].toInt());
+        bufferSize = obj["bufferSize"].toInt();
+        
+        // 输入设备配置
+        if (obj.contains("inputDevice")) {
+            QJsonObject inputObj = obj["inputDevice"].toObject();
+            inputDevice.id = inputObj["id"].toInt();
+            inputDevice.name = inputObj["name"].toString().toStdString();
+            inputDevice.maxChannels = inputObj["maxChannels"].toInt();
+            inputDevice.defaultSampleRate = inputObj["defaultSampleRate"].toDouble();
+            inputDevice.sensitivity = inputObj["sensitivity"].toDouble();
+            inputDevice.signalToNoiseRatio = inputObj["signalToNoiseRatio"].toDouble();
+        }
 
-    // 音频参数
-    int sampleRate_;
-    int channels_;
-    AudioFormat format_;
-    int bufferSize_;
+        // 输出设备配置
+        if (obj.contains("outputDevice")) {
+            QJsonObject outputObj = obj["outputDevice"].toObject();
+            outputDevice.id = outputObj["id"].toInt();
+            outputDevice.name = outputObj["name"].toString().toStdString();
+            outputDevice.maxChannels = outputObj["maxChannels"].toInt();
+            outputDevice.defaultSampleRate = outputObj["defaultSampleRate"].toDouble();
+            outputDevice.maxVolume = outputObj["maxVolume"].toDouble();
+            outputDevice.impedance = outputObj["impedance"].toDouble();
+        }
 
-    // 错误信息
-    mutable std::string lastError_;
-
-    // 线程安全
-    mutable std::mutex mutex_;
-    std::vector<ConfigChangeCallback> configChangeListeners_;
+        // 录音配置
+        recordingPath = obj["recordingPath"].toString();
+        autoStartRecording = obj["autoStartRecording"].toBool();
+        maxRecordingDuration = obj["maxRecordingDuration"].toInt();
+        
+        // VAD配置
+        vadThreshold = obj["vadThreshold"].toDouble();
+    }
 };
 
 } // namespace perfx 

@@ -5,6 +5,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include "audio/audio_device_info.h"
 
 namespace perfx {
 
@@ -20,26 +21,39 @@ public:
     AudioDevice();
     ~AudioDevice();
 
-    // 获取所有可用的音频输入设备
-    std::vector<AudioDeviceInfo> getInputDevices();
-    
-    // 设置当前音频设备
-    bool setDevice(int deviceId);
-    
+    // 设备管理
+    std::vector<InputDeviceInfo> getInputDevices() const;
+    std::vector<OutputDeviceInfo> getOutputDevices() const;
+    bool setInputDevice(int deviceId);
+    bool setOutputDevice(int deviceId);
+
+    // 音频参数设置
+    void setSampleRate(int sampleRate);
+    void setChannels(int channels);
+    void setBitDepth(int bitDepth);
+    void setBufferSize(int bufferSize);
+
+    // 录音和播放
+    using AudioCallback = std::function<void(const float* data, int frames)>;
+    bool startRecording(AudioCallback callback);
+    void stopRecording();
+    bool playAudio(const float* data, int frames, std::function<void()> onFinished = nullptr);
+    void stopPlayback();
+
+    // 设备状态
+    bool isRecording() const;
+    bool isPlaying() const;
+    int getCurrentInputDevice() const;
+    int getCurrentOutputDevice() const;
+
     // 获取当前设备信息
     AudioDeviceInfo getCurrentDeviceInfo() const;
-    
-    // 开始录音
-    void startRecording(std::function<void(const float*, int)> callback);
-    
-    // 停止录音
-    void stopRecording();
-    
-    // 播放音频
-    void playAudio(const float* data, int frames);
 
-    void setSampleRate(int rate);
-    int getSampleRate() const;
+    // 设备初始化
+    bool initialize(int deviceId, int sampleRate, int channels);
+    // 读写接口
+    bool read(float* buffer, int frames);
+    bool write(const float* buffer, int frames);
 
 private:
     static int paCallback(const void* inputBuffer, void* outputBuffer,
@@ -48,10 +62,13 @@ private:
                          PaStreamCallbackFlags statusFlags,
                          void* userData);
 
+    void updateDeviceList();
+
     PaStream* stream_;
     std::vector<AudioDeviceInfo> inputDevices_;
     AudioDeviceInfo currentDevice_;
     std::function<void(const float*, int)> audioCallback_;
+    std::function<void()> playbackFinishedCallback_;
     int sampleRate_;
     int channels_;
     bool isRecording_;

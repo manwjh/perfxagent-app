@@ -1,50 +1,76 @@
 #include "ui/main_window.h"
-#include "ui/audio_settings.h"
-#include "ui/server_settings.h"
-#include <QTabWidget>
-#include <QVBoxLayout>
-#include <iostream>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QMessageBox>
+
+namespace perfx {
+namespace ui {
 
 MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent) {
-    setWindowTitle("PerfxAgent");
-    resize(800, 600);
+    : QMainWindow(parent)
+    , tabWidget_(new QTabWidget(this))
+    , deviceSettings_(new DeviceSettings(this))
+    , agentZoo_(new AgentZoo(this))
+    , helloWindow_(new HelloWindow(this))
+{
+    setupUi();
+    createConnections();
+}
 
-    auto* centralWidget = new QWidget(this);
-    setCentralWidget(centralWidget);
+void MainWindow::setupUi() {
+    setWindowTitle("Perfx Agent 应用");
+    resize(1024, 768);
+    setCentralWidget(tabWidget_);
 
-    auto* layout = new QVBoxLayout(centralWidget);
+    tabWidget_->addTab(helloWindow_, "Hello AI");
+    tabWidget_->addTab(agentZoo_, "Agent Zoo");
+    tabWidget_->addTab(deviceSettings_, "系统设置");
 
-    // 创建标签页
-    auto* tabWidget = new QTabWidget(this);
-    
-    // 添加音频设置标签页
-    audioSettings_ = new perfx::ui::AudioSettingsWidget(this);
-    tabWidget->addTab(audioSettings_, "音频设置");
+    tabWidget_->setStyleSheet(R"(
+        QTabWidget::pane {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f0f0f0;
+        }
+        QTabBar::tab {
+            min-width: 120px;
+            min-height: 32px;
+            font-size: 15px;
+            padding: 8px 20px;
+            border-radius: 6px 6px 0 0;
+        }
+        QTabBar::tab:selected {
+            background: #e0e0e0;
+            color: #007bff;
+            font-weight: bold;
+        }
+        QTabBar::tab:!selected {
+            background: #f0f0f0;
+            color: #333;
+        }
+    )");
+}
 
-    // 添加服务器设置标签页
-    serverSettings_ = new ServerSettingsWidget(this);
-    tabWidget->addTab(serverSettings_, "服务器设置");
-
-    layout->addWidget(tabWidget);
-
-    // 连接信号
-    connect(audioSettings_, &perfx::ui::AudioSettingsWidget::deviceChanged,
-            this, &MainWindow::onAudioDeviceChanged);
-    connect(audioSettings_, &perfx::ui::AudioSettingsWidget::recordingStarted,
+void MainWindow::createConnections() {
+    connect(deviceSettings_, &DeviceSettings::settingsChanged,
+            this, &MainWindow::onSettingsChanged);
+    connect(deviceSettings_, &DeviceSettings::deviceChanged,
+            this, &MainWindow::onDeviceChanged);
+    connect(deviceSettings_, &DeviceSettings::recordingStarted,
             this, &MainWindow::onRecordingStarted);
-    connect(audioSettings_, &perfx::ui::AudioSettingsWidget::recordingStopped,
+    connect(deviceSettings_, &DeviceSettings::recordingStopped,
             this, &MainWindow::onRecordingStopped);
 }
 
-void MainWindow::onAudioDeviceChanged(int deviceId) {
-    std::cout << "设备已更改: " << deviceId << std::endl;
+void MainWindow::onSettingsChanged(const QString& url, const QString& accessToken, 
+                                 const QString& deviceId, const QString& clientId) {
+    agentZoo_->setWebSocketParams(url, accessToken, deviceId, clientId);
 }
 
-void MainWindow::onRecordingStarted() {
-    std::cout << "开始录音" << std::endl;
-}
+void MainWindow::onDeviceChanged(const QString& deviceId) { (void)deviceId; }
+void MainWindow::onRecordingStarted() {}
+void MainWindow::onRecordingStopped() {}
 
-void MainWindow::onRecordingStopped() {
-    std::cout << "停止录音" << std::endl;
-} 
+MainWindow::~MainWindow() {}
+
+} // namespace ui
+} // namespace perfx 
