@@ -1,274 +1,125 @@
-#include "audio/audio_manager.h"
-#include "audio/audio_device.h"
-#include "audio/audio_thread.h"
-#include <portaudio.h>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QFile>
-#include <mutex>
-#include <memory>
+#include "../../include/audio/audio_manager.h"
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace perfx {
+namespace audio {
 
 class AudioManager::Impl {
 public:
-    Impl() : state_(AudioState::IDLE) {
-        Pa_Initialize();
-    }
+    Impl() : initialized_(false) {}
 
     ~Impl() {
         cleanup();
-        Pa_Terminate();
     }
 
     bool initialize() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ != AudioState::IDLE) {
-            lastError_ = "Already initialized";
-            return false;
-        }
+        if (initialized_) return true;
 
+        // 初始化音频设备（这会初始化 PortAudio）
         device_ = std::make_unique<AudioDevice>();
-        thread_ = std::make_unique<AudioThread>();
-        
-        AudioThreadConfig threadConfig;
-        threadConfig.sampleRate = config_.sampleRate;
-        threadConfig.channels = config_.channels;
-        threadConfig.bufferSize = config_.bufferSize;
-        threadConfig.vadThreshold = config_.vadThreshold;
-
-        if (!thread_->initialize(threadConfig)) {
-            lastError_ = "Failed to initialize audio thread";
+        if (!device_->initialize()) {
             return false;
         }
 
+        // 初始化音频处理器，使用默认配置
+        processor_ = std::make_shared<AudioProcessor>();
+        AudioConfig defaultConfig;
+        defaultConfig.sampleRate = SampleRate::RATE_48000;
+        defaultConfig.channels = ChannelCount::MONO;
+        defaultConfig.format = SampleFormat::FLOAT32;
+        defaultConfig.framesPerBuffer = 256;
+        
+        if (!processor_->initialize(defaultConfig)) {
+            return false;
+        }
+
+        initialized_ = true;
         return true;
     }
 
-    void cleanup() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (thread_) {
-            thread_->stop();
-        }
-        thread_.reset();
-        device_.reset();
-        state_ = AudioState::IDLE;
-    }
+    bool loadConfig(const std::string& configPath) {
+        try {
+            std::ifstream file(configPath);
+            if (!file.is_open()) {
+                return false;
+            }
 
-    std::vector<InputDeviceInfo> getInputDevices() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return device_ ? device_->getInputDevices() : std::vector<InputDeviceInfo>();
-    }
+            nlohmann::json j;
+            file >> j;
 
-    std::vector<OutputDeviceInfo> getOutputDevices() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return device_ ? device_->getOutputDevices() : std::vector<OutputDeviceInfo>();
-    }
+            AudioConfig config;
+            config.sampleRate = static_cast<SampleRate>(j["sampleRate"].get<int>());
+            config.channels = static_cast<ChannelCount>(j["channels"].get<int>());
+            config.format = static_cast<SampleFormat>(j["format"].get<int>());
+            config.framesPerBuffer = j["framesPerBuffer"].get<int>();
 
-    bool setInputDevice(int deviceId) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!device_) {
-            lastError_ = "Device not initialized";
+            return updateConfig(config);
+        } catch (const std::exception&) {
             return false;
         }
-        return device_->setInputDevice(deviceId);
     }
 
-    bool setOutputDevice(int deviceId) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!device_) {
-            lastError_ = "Device not initialized";
+    bool saveConfig(const std::string& configPath) {
+        try {
+            nlohmann::json j;
+            j["sampleRate"] = static_cast<int>(config_.sampleRate);
+            j["channels"] = static_cast<int>(config_.channels);
+            j["format"] = static_cast<int>(config_.format);
+            j["framesPerBuffer"] = config_.framesPerBuffer;
+
+            std::ofstream file(configPath);
+            if (!file.is_open()) {
+                return false;
+            }
+
+            file << j.dump(4);
+            return true;
+        } catch (const std::exception&) {
             return false;
         }
-        return device_->setOutputDevice(deviceId);
     }
 
-    int getCurrentInputDevice() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return device_ ? device_->getCurrentInputDevice() : -1;
+    std::vector<DeviceInfo> getAvailableDevices() {
+        return device_->getAvailableDevices();
     }
 
-    int getCurrentOutputDevice() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return device_ ? device_->getCurrentOutputDevice() : -1;
+    std::shared_ptr<AudioThread> createAudioThread(const AudioConfig& config) {
+        auto thread = std::make_shared<AudioThread>();
+        if (!thread->initialize(config)) {
+            return nullptr;
+        }
+        return thread;
     }
 
-    void setConfig(const AudioConfig& config) {
-        std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_ptr<AudioProcessor> getProcessor() {
+        return processor_;
+    }
+
+    bool updateConfig(const AudioConfig& config) {
+        if (!initialized_) {
+            return false;
+        }
+
         config_ = config;
-        if (thread_) {
-            AudioThreadConfig threadConfig;
-            threadConfig.sampleRate = config.sampleRate;
-            threadConfig.channels = config.channels;
-            threadConfig.bufferSize = config.bufferSize;
-            threadConfig.vadThreshold = config.vadThreshold;
-            thread_->initialize(threadConfig);
-        }
+        return processor_->initialize(config);
     }
 
-    AudioConfig getConfig() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+    AudioConfig getCurrentConfig() const {
         return config_;
     }
 
-    bool saveConfig(const std::string& filePath) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        QJsonObject obj;
-        obj["sampleRate"] = config_.sampleRate;
-        obj["channels"] = config_.channels;
-        obj["format"] = static_cast<int>(config_.format);
-        obj["bufferSize"] = config_.bufferSize;
-        obj["vadThreshold"] = config_.vadThreshold;
-        obj["autoStartRecording"] = config_.autoStartRecording;
-        obj["maxRecordingDuration"] = config_.maxRecordingDuration;
-
-        QFile file(QString::fromStdString(filePath));
-        if (!file.open(QIODevice::WriteOnly)) {
-            lastError_ = "Failed to open config file for writing";
-            return false;
-        }
-
-        file.write(QJsonDocument(obj).toJson());
-        return true;
-    }
-
-    bool loadConfig(const std::string& filePath) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        QFile file(QString::fromStdString(filePath));
-        if (!file.open(QIODevice::ReadOnly)) {
-            lastError_ = "Failed to open config file for reading";
-            return false;
-        }
-
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        if (doc.isNull()) {
-            lastError_ = "Invalid JSON format in config file";
-            return false;
-        }
-
-        QJsonObject obj = doc.object();
-        config_.sampleRate = obj["sampleRate"].toInt();
-        config_.channels = obj["channels"].toInt();
-        config_.format = static_cast<AudioFormat>(obj["format"].toInt());
-        config_.bufferSize = obj["bufferSize"].toInt();
-        config_.vadThreshold = obj["vadThreshold"].toDouble();
-        config_.autoStartRecording = obj["autoStartRecording"].toBool();
-        config_.maxRecordingDuration = obj["maxRecordingDuration"].toInt();
-
-        return true;
-    }
-
-    bool startRecording() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ != AudioState::IDLE) {
-            lastError_ = "Cannot start recording in current state";
-            return false;
-        }
-
-        if (!thread_) {
-            lastError_ = "Audio thread not initialized";
-            return false;
-        }
-
-        thread_->setVadCallback([this](bool isActive) {
-            if (callbacks_.onVadStateChanged) {
-                callbacks_.onVadStateChanged(isActive);
-            }
-        });
-
-        if (!thread_->startListening()) {
-            lastError_ = "Failed to start listening";
-            return false;
-        }
-
-        state_ = AudioState::RECORDING;
-        if (callbacks_.onStateChanged) {
-            callbacks_.onStateChanged(state_);
-        }
-
-        return true;
-    }
-
-    void stopRecording() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (thread_) {
-            thread_->stop();
-        }
-        state_ = AudioState::IDLE;
-        if (callbacks_.onStateChanged) {
-            callbacks_.onStateChanged(state_);
-        }
-    }
-
-    bool isRecording() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return state_ == AudioState::RECORDING;
-    }
-
-    void setRecordingCallbacks(const AudioCallbacks& callbacks) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        callbacks_ = callbacks;
-    }
-
-    bool playAudio(const std::vector<float>& data) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ != AudioState::IDLE) {
-            lastError_ = "Cannot play audio in current state";
-            return false;
-        }
-
-        if (!thread_) {
-            lastError_ = "Audio thread not initialized";
-            return false;
-        }
-
-        if (!thread_->startPlaying(data)) {
-            lastError_ = "Failed to start playing";
-            return false;
-        }
-
-        state_ = AudioState::PLAYING;
-        if (callbacks_.onStateChanged) {
-            callbacks_.onStateChanged(state_);
-        }
-
-        return true;
-    }
-
-    void stopPlayback() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (thread_) {
-            thread_->stop();
-        }
-        state_ = AudioState::IDLE;
-        if (callbacks_.onStateChanged) {
-            callbacks_.onStateChanged(state_);
-        }
-    }
-
-    bool isPlaying() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return state_ == AudioState::PLAYING;
-    }
-
-    AudioState getState() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return state_;
-    }
-
-    std::string getLastError() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return lastError_;
+    void cleanup() {
+        processor_.reset();
+        device_.reset();
+        initialized_ = false;
     }
 
 private:
-    mutable std::mutex mutex_;
-    std::unique_ptr<AudioDevice> device_;
-    std::unique_ptr<AudioThread> thread_;
+    bool initialized_;
     AudioConfig config_;
-    AudioState state_;
-    AudioCallbacks callbacks_;
-    mutable std::string lastError_;
+    std::unique_ptr<AudioDevice> device_;
+    std::shared_ptr<AudioProcessor> processor_;
 };
 
 // AudioManager implementation
@@ -277,34 +128,18 @@ AudioManager& AudioManager::getInstance() {
     return instance;
 }
 
-AudioManager::AudioManager() : pimpl_(std::make_unique<Impl>()) {}
+AudioManager::AudioManager() : impl_(std::make_unique<Impl>()) {}
 AudioManager::~AudioManager() = default;
 
-bool AudioManager::initialize() { return pimpl_->initialize(); }
-void AudioManager::cleanup() { pimpl_->cleanup(); }
+bool AudioManager::initialize() { return impl_->initialize(); }
+bool AudioManager::loadConfig(const std::string& configPath) { return impl_->loadConfig(configPath); }
+bool AudioManager::saveConfig(const std::string& configPath) { return impl_->saveConfig(configPath); }
+std::vector<DeviceInfo> AudioManager::getAvailableDevices() { return impl_->getAvailableDevices(); }
+std::shared_ptr<AudioThread> AudioManager::createAudioThread(const AudioConfig& config) { return impl_->createAudioThread(config); }
+std::shared_ptr<AudioProcessor> AudioManager::getProcessor() { return impl_->getProcessor(); }
+bool AudioManager::updateConfig(const AudioConfig& config) { return impl_->updateConfig(config); }
+AudioConfig AudioManager::getCurrentConfig() const { return impl_->getCurrentConfig(); }
+void AudioManager::cleanup() { impl_->cleanup(); }
 
-std::vector<InputDeviceInfo> AudioManager::getInputDevices() const { return pimpl_->getInputDevices(); }
-std::vector<OutputDeviceInfo> AudioManager::getOutputDevices() const { return pimpl_->getOutputDevices(); }
-bool AudioManager::setInputDevice(int deviceId) { return pimpl_->setInputDevice(deviceId); }
-bool AudioManager::setOutputDevice(int deviceId) { return pimpl_->setOutputDevice(deviceId); }
-int AudioManager::getCurrentInputDevice() const { return pimpl_->getCurrentInputDevice(); }
-int AudioManager::getCurrentOutputDevice() const { return pimpl_->getCurrentOutputDevice(); }
-
-void AudioManager::setConfig(const AudioConfig& config) { pimpl_->setConfig(config); }
-AudioConfig AudioManager::getConfig() const { return pimpl_->getConfig(); }
-bool AudioManager::saveConfig(const std::string& filePath) const { return pimpl_->saveConfig(filePath); }
-bool AudioManager::loadConfig(const std::string& filePath) { return pimpl_->loadConfig(filePath); }
-
-bool AudioManager::startRecording() { return pimpl_->startRecording(); }
-void AudioManager::stopRecording() { pimpl_->stopRecording(); }
-bool AudioManager::isRecording() const { return pimpl_->isRecording(); }
-void AudioManager::setRecordingCallbacks(const AudioCallbacks& callbacks) { pimpl_->setRecordingCallbacks(callbacks); }
-
-bool AudioManager::playAudio(const std::vector<float>& data) { return pimpl_->playAudio(data); }
-void AudioManager::stopPlayback() { pimpl_->stopPlayback(); }
-bool AudioManager::isPlaying() const { return pimpl_->isPlaying(); }
-
-AudioState AudioManager::getState() const { return pimpl_->getState(); }
-std::string AudioManager::getLastError() const { return pimpl_->getLastError(); }
-
+} // namespace audio
 } // namespace perfx 

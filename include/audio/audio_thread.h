@@ -1,81 +1,63 @@
 #pragma once
 
-#include "audio/audio_device.h"
+#include "audio_types.h"
+#include "audio_device.h"
+#include "audio_processor.h"
+#include <memory>
 #include <thread>
+#include <atomic>
+#include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <queue>
-#include <atomic>
 #include <functional>
-#include <vector>
 
 namespace perfx {
+namespace audio {
 
-enum class AudioThreadState {
-    IDLE,       // 空闲状态
-    LISTENING,  // 聆听状态
-    PLAYING,    // 播放状态
-    PAUSED,     // 暂停状态
-    STOPPED     // 停止状态
-};
-
-struct AudioThreadConfig {
-    int sampleRate = 16000;
-    int channels = 1;
-    int deviceId = -1;  // -1 表示使用默认设备
-    float vadThreshold = 0.5f;
-    int bufferSize = 15 * 16000;  // 15秒的缓冲区大小
-};
-
-struct AudioStats {
-    int bufferSize;
-    bool isVadActive;
-    AudioThreadState currentState;
-    int framesProcessed;
-};
+class AudioProcessor;
 
 class AudioThread {
 public:
+    using AudioCallback = std::function<void(const void* input, size_t frames)>;
+
     AudioThread();
     ~AudioThread();
 
-    // 初始化和配置
-    bool initialize(const AudioThreadConfig& config);
-    void setVadCallback(std::function<void(bool)> callback);
-
-    // 状态控制
-    bool startListening();
-    bool startPlaying(const std::vector<float>& audioData);
-    void pause();
+    // 初始化线程
+    bool initialize(const AudioConfig& config);
+    
+    // 启动音频处理线程
+    bool start();
+    
+    // 停止音频处理线程
     void stop();
-    void resume();
+    
+    // 设置输入设备
+    bool setInputDevice(const DeviceInfo& device);
+    
+    // 设置输出设备
+    bool setOutputDevice(const DeviceInfo& device);
+    
+    // 添加音频处理回调
+    void addProcessor(std::shared_ptr<AudioProcessor> processor);
+    
+    // 设置回调
+    void setInputCallback(AudioCallback callback);
+    
+    // 获取当前状态
+    bool isRunning() const;
+    
+    // 获取当前配置
+    AudioConfig getCurrentConfig() const;
 
-    // 状态查询
-    AudioThreadState getState() const;
-    AudioStats getStats() const;
-    std::vector<float> getAudioBuffer() const;
+    // 重采样相关函数
+    bool enableResampling(SampleRate targetRate);
+    void disableResampling();
 
 private:
-    void threadFunction();
-    void processAudioInput(const float* input, int frames);
-    bool isVadActive(const float* input, int frames);
-
-    AudioDevice audioDevice_;
-    AudioThreadConfig config_;
-    std::thread thread_;
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    std::atomic<AudioThreadState> state_;
-    
-    std::vector<float> audioBuffer_;
-    std::queue<std::vector<float>> playbackQueue_;
-    
-    std::function<void(bool)> vadCallback_;
-    bool shouldStop_;
-    
-    // 统计信息
-    std::atomic<int> framesProcessed_;
-    std::atomic<bool> vadActive_;
+    class Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
+} // namespace audio
 } // namespace perfx 

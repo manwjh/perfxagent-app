@@ -25,13 +25,39 @@ set(CMAKE_AUTOUIC ON)
 # 平台特定配置
 if(APPLE)
     # macOS specific configuration
-    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "/opt/homebrew/opt/qt@6")
-    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "/opt/homebrew/opt/openssl@3")
-    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "/opt/homebrew/opt/portaudio")
-    set(Qt6_DIR "/opt/homebrew/opt/qt@6/lib/cmake/Qt6")
-    set(BOOST_ROOT "/opt/homebrew/opt/boost")
-    set(BOOST_INCLUDEDIR "/opt/homebrew/opt/boost/include")
-    set(BOOST_LIBRARYDIR "/opt/homebrew/opt/boost/lib")
+    execute_process(
+        COMMAND brew --prefix qt@6
+        OUTPUT_VARIABLE QT6_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND brew --prefix openssl@3
+        OUTPUT_VARIABLE OPENSSL_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND brew --prefix portaudio
+        OUTPUT_VARIABLE PORTAUDIO_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND brew --prefix boost
+        OUTPUT_VARIABLE BOOST_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    set(CMAKE_PREFIX_PATH 
+        ${CMAKE_PREFIX_PATH} 
+        "${QT6_PREFIX}"
+        "${OPENSSL_PREFIX}"
+        "${PORTAUDIO_PREFIX}"
+    )
+    set(Qt6_DIR "${QT6_PREFIX}/lib/cmake/Qt6")
+    set(BOOST_ROOT "${BOOST_PREFIX}")
+    set(BOOST_INCLUDEDIR "${BOOST_PREFIX}/include")
+    set(BOOST_LIBRARYDIR "${BOOST_PREFIX}/lib")
+    include_directories(${PORTAUDIO_PREFIX}/include)
+    include_directories(/opt/homebrew/opt/portaudio/include)
 endif()
 
 if(WIN32)
@@ -69,6 +95,27 @@ find_package(Qt6 6.4.0 COMPONENTS
 )
 
 find_package(PortAudio 19.7.0 REQUIRED)
+find_package(Opus REQUIRED)
+find_package(WebRTC QUIET)
+find_package(SAMPLERATE REQUIRED)
+find_package(nlohmann_json 3.11.3 REQUIRED)
+find_package(PkgConfig REQUIRED)
+find_package(OpenCV REQUIRED)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+    libavcodec
+    libavformat
+    libavutil
+    libswresample
+)
+# find_package(GTest REQUIRED)
+
+# GTest 手动路径设置（Homebrew 安装）
+set(GTEST_ROOT /opt/homebrew/Cellar/googletest/1.17.0)
+set(GTEST_INCLUDE_DIR ${GTEST_ROOT}/include)
+set(GTEST_LIBRARY ${GTEST_ROOT}/lib/libgtest.a)
+set(GTEST_MAIN_LIBRARY ${GTEST_ROOT}/lib/libgtest_main.a)
+include_directories(${GTEST_INCLUDE_DIR})
+link_libraries(${GTEST_LIBRARY} ${GTEST_MAIN_LIBRARY})
 
 # Boost 配置
 set(Boost_USE_STATIC_LIBS OFF)
@@ -92,9 +139,6 @@ include_directories(/opt/homebrew/opt/boost/include)
 
 find_package(OpenSSL 3.0.0 REQUIRED)
 
-# 添加nlohmann/json
-find_package(nlohmann_json 3.11.3 REQUIRED)
-
 # 添加源文件
 set(SOURCES
     src/main.cpp
@@ -103,14 +147,14 @@ set(SOURCES
     src/ui/device_settings.cpp
     src/ui/hello_window.cpp
     src/audio/audio_device.cpp
-    src/audio/audio_config.cpp
-    src/audio/audio_thread.cpp
     src/core/config_manager.cpp
     src/connection/websocket_client.cpp
     src/connection/websocket_message.cpp
     src/connection/thread_pool.cpp
     src/connection/connection_manager.cpp
     src/audio/audio_manager.cpp
+    src/camera/camera_device.cpp
+    src/camera/camera_manager.cpp
 )
 
 # 添加头文件
@@ -120,19 +164,150 @@ set(HEADERS
     include/ui/device_settings.h
     include/ui/hello_window.h
     include/audio/audio_device.h
-    include/audio/audio_thread.h
-    include/audio/audio_device_info.h
-    include/audio/audio_config.h
     include/core/config_manager.h
     include/connection/websocket_client.h
     include/connection/websocket_message.h
     include/connection/thread_pool.h
     include/connection/connection_manager.h
     include/audio/audio_manager.h
+    include/camera/camera_device.h
+    include/camera/camera_manager.h
+    include/camera/camera_types.h
 )
+
+# 添加主项目包含目录
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/connection
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/camera
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Gui_INCLUDE_DIRS}
+    ${Qt6Widgets_INCLUDE_DIRS}
+    ${Qt6Network_INCLUDE_DIRS}
+    ${Qt6WebEngineWidgets_INCLUDE_DIRS}
+    ${Qt6WebSockets_INCLUDE_DIRS}
+    ${Qt6Multimedia_INCLUDE_DIRS}
+    ${QT6_PREFIX}/include
+    ${QT6_PREFIX}/include/QtCore
+    ${QT6_PREFIX}/include/QtGui
+    ${QT6_PREFIX}/include/QtWidgets
+    ${QT6_PREFIX}/include/QtNetwork
+    ${QT6_PREFIX}/include/QtWebEngineWidgets
+    ${QT6_PREFIX}/include/QtWebSockets
+    ${QT6_PREFIX}/include/QtMultimedia
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+# 添加音频库源文件
+set(AUDIO_SOURCES
+    src/audio/audio_device.cpp
+    src/audio/audio_processor.cpp
+    src/audio/audio_thread.cpp
+    src/audio/audio_manager.cpp
+    src/audio/audio_types.cpp
+)
+
+# 添加音频库头文件
+set(AUDIO_HEADERS
+    include/audio/audio_types.h
+    include/audio/audio_device.h
+    include/audio/audio_processor.h
+    include/audio/audio_thread.h
+    include/audio/audio_manager.h
+)
+
+# 创建音频库
+add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS})
+
+# 设置音频库包含目录
+target_include_directories(perfx_audio PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${PortAudio_INCLUDE_DIRS}
+    ${PORTAUDIO_PREFIX}/include
+    ${Opus_INCLUDE_DIRS}
+    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
+    ${SAMPLERATE_INCLUDE_DIRS}
+)
+
+# 链接音频库依赖
+target_link_libraries(perfx_audio PUBLIC
+    ${PortAudio_LIBRARIES}
+    ${Opus_LIBRARIES}
+    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_LIBRARIES}>
+    ${SAMPLERATE_LIBRARIES}
+    nlohmann_json::nlohmann_json
+    PkgConfig::FFMPEG
+)
+
+# 设置编译选项
+target_compile_features(perfx_audio PUBLIC cxx_std_17)
+if(MSVC)
+    target_compile_options(perfx_audio PRIVATE /W4 /WX)
+else()
+    target_compile_options(perfx_audio PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# 添加连接库源文件
+set(CONNECTION_SOURCES
+    src/connection/websocket_client.cpp
+    src/connection/websocket_message.cpp
+    src/connection/thread_pool.cpp
+    src/connection/connection_manager.cpp
+)
+
+# 添加连接库头文件
+set(CONNECTION_HEADERS
+    include/connection/websocket_client.h
+    include/connection/websocket_message.h
+    include/connection/thread_pool.h
+    include/connection/connection_manager.h
+)
+
+# 创建连接库
+add_library(perfx_connection STATIC ${CONNECTION_SOURCES} ${CONNECTION_HEADERS})
+
+# 设置连接库包含目录
+target_include_directories(perfx_connection PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${Boost_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIR}
+)
+
+# 链接连接库依赖
+target_link_libraries(perfx_connection PUBLIC
+    ${Boost_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+)
+
+# 设置编译选项
+target_compile_features(perfx_connection PUBLIC cxx_std_17)
+if(MSVC)
+    target_compile_options(perfx_connection PRIVATE /W4 /WX)
+else()
+    target_compile_options(perfx_connection PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
 
 # 创建可执行文件
 add_executable(perfxagent-app ${SOURCES} ${HEADERS})
+
+# 添加examples目录
+add_subdirectory(examples)
+
+# 设置可执行文件的包含目录
+target_include_directories(perfxagent-app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${PortAudio_INCLUDE_DIRS}
+    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
+)
 
 # 链接库
 target_link_libraries(perfxagent-app PRIVATE
@@ -149,7 +324,10 @@ target_link_libraries(perfxagent-app PRIVATE
     nlohmann_json::nlohmann_json
     Boost::system
     Boost::thread
-    /opt/homebrew/lib/libboost_url.dylib
+    $<$<PLATFORM_ID:Darwin>:${BOOST_LIBRARYDIR}/libboost_url.dylib>
+    perfx_audio
+    perfx_connection
+    ${OpenCV_LIBS}
 )
 
 # 复制 Qt DLL 到输出目录（仅 Windows）
@@ -178,6 +356,7 @@ target_include_directories(perfxagent-app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${PortAudio_INCLUDE_DIRS}
+    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
     ${Qt6Widgets_INCLUDE_DIRS}
@@ -194,6 +373,7 @@ target_include_directories(perfxagent-app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/include/core
     ${CMAKE_CURRENT_SOURCE_DIR}/include/connection
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/camera
     ${nlohmann_json_INCLUDE_DIRS}
 )
 
@@ -202,58 +382,25 @@ set_target_properties(perfxagent-app PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# 音频库源文件
-set(AUDIO_SOURCES
-    src/audio/audio_manager.cpp
-    src/audio/audio_device.cpp
-    src/audio/audio_thread.cpp
-)
-
-# 音频库头文件
-set(AUDIO_HEADERS
-    include/audio/audio_manager.h
-    include/audio/audio_device.h
-    include/audio/audio_thread.h
-    include/audio/audio_device_info.h
-)
-
-# 创建音频库
-add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS})
-
-# 设置音频库的包含目录
-target_include_directories(perfx_audio PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${PortAudio_INCLUDE_DIRS}
-    ${Qt6Core_INCLUDE_DIRS}
-)
-
-# 链接音频库的依赖
-target_link_libraries(perfx_audio PUBLIC
-    Qt6::Core
-    ${PortAudio_LIBRARIES}
-)
-
-# 添加示例程序
-add_executable(audio_example examples/audio_example.cpp)
-
-# 设置示例程序的包含目录
-target_include_directories(audio_example PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# 链接示例程序的依赖
-target_link_libraries(audio_example PRIVATE
-    perfx_audio
-)
-
 # 安装规则
-install(TARGETS perfx_audio audio_example
+install(TARGETS perfx_audio
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
 )
 
 install(DIRECTORY include/
     DESTINATION include
     FILES_MATCHING PATTERN "*.h"
-) 
+)
+
+include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/include/audio)
+
+# 添加测试
+enable_testing()
+# add_subdirectory(tests/audio)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${PortAudio_INCLUDE_DIRS})
+include_directories(${Opus_INCLUDE_DIRS})
+include_directories(${SAMPLERATE_INCLUDE_DIRS}) 

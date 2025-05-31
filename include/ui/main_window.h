@@ -2,12 +2,17 @@
 
 #include <QMainWindow>
 #include <QTabWidget>
+#include <QStatusBar>
 #include "../../include/ui/device_settings.h"
 #include "ui/agent_zoo.h"
 #include "ui/hello_window.h"
 
 namespace perfx {
 namespace ui {
+
+class DeviceSettings;
+class AgentZoo;
+class HelloWindow;
 
 // 主窗口，包含所有Tab页
 class MainWindow : public QMainWindow {
@@ -17,7 +22,6 @@ public:
     ~MainWindow();
 
 private slots:
-    void onSettingsChanged(const QString& url, const QString& accessToken, const QString& deviceId, const QString& clientId);
     void onDeviceChanged(const QString& deviceId);
     void onRecordingStarted();
     void onRecordingStopped();
@@ -32,6 +36,7 @@ private:
     DeviceSettings* deviceSettings_;
     AgentZoo* agentZoo_;
     HelloWindow* helloWindow_;
+    QStatusBar* statusBar_;
 };
 
 } // namespace ui

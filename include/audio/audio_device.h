@@ -1,77 +1,67 @@
 #pragma once
 
-#include <portaudio.h>
+#include "audio_types.h"
+#include <memory>
 #include <vector>
 #include <string>
+#include <mutex>
 #include <functional>
-#include <memory>
-#include "audio/audio_device_info.h"
 
 namespace perfx {
-
-struct AudioDeviceInfo {
-    int id;
-    std::string name;
-    int channels;
-    double sampleRate;
-};
+namespace audio {
 
 class AudioDevice {
 public:
+    using AudioCallback = std::function<void(const void* input, void* output, size_t frameCount)>;
+
     AudioDevice();
     ~AudioDevice();
 
-    // 设备管理
-    std::vector<InputDeviceInfo> getInputDevices() const;
-    std::vector<OutputDeviceInfo> getOutputDevices() const;
-    bool setInputDevice(int deviceId);
-    bool setOutputDevice(int deviceId);
-
-    // 音频参数设置
-    void setSampleRate(int sampleRate);
-    void setChannels(int channels);
-    void setBitDepth(int bitDepth);
-    void setBufferSize(int bufferSize);
-
-    // 录音和播放
-    using AudioCallback = std::function<void(const float* data, int frames)>;
-    bool startRecording(AudioCallback callback);
-    void stopRecording();
-    bool playAudio(const float* data, int frames, std::function<void()> onFinished = nullptr);
-    void stopPlayback();
-
-    // 设备状态
-    bool isRecording() const;
-    bool isPlaying() const;
-    int getCurrentInputDevice() const;
-    int getCurrentOutputDevice() const;
-
-    // 获取当前设备信息
-    AudioDeviceInfo getCurrentDeviceInfo() const;
-
-    // 设备初始化
-    bool initialize(int deviceId, int sampleRate, int channels);
-    // 读写接口
-    bool read(float* buffer, int frames);
-    bool write(const float* buffer, int frames);
+    // 初始化 PortAudio
+    bool initialize();
+    
+    // 获取所有可用的音频设备
+    std::vector<DeviceInfo> getAvailableDevices();
+    
+    // 获取默认输入设备
+    DeviceInfo getDefaultInputDevice();
+    
+    // 获取默认输出设备
+    DeviceInfo getDefaultOutputDevice();
+    
+    // 打开输入设备
+    bool openInputDevice(const DeviceInfo& device, const AudioConfig& config);
+    
+    // 打开输出设备
+    bool openOutputDevice(const DeviceInfo& device, const AudioConfig& config);
+    
+    // 开始音频流
+    bool startStream();
+    
+    // 停止音频流
+    bool stopStream();
+    
+    // 关闭设备
+    void closeDevice();
+    
+    // 设置音频回调函数
+    void setCallback(AudioCallback callback);
+    
+    // 检查设备是否正在运行
+    bool isStreamActive() const;
+    
+    // 获取当前配置
+    AudioConfig getCurrentConfig() const;
+    
+    // 新增方法
+    bool isDeviceOpen() const;
+    DeviceInfo getCurrentDevice() const;
+    std::string getLastError() const;
 
 private:
-    static int paCallback(const void* inputBuffer, void* outputBuffer,
-                         unsigned long framesPerBuffer,
-                         const PaStreamCallbackTimeInfo* timeInfo,
-                         PaStreamCallbackFlags statusFlags,
-                         void* userData);
-
-    void updateDeviceList();
-
-    PaStream* stream_;
-    std::vector<AudioDeviceInfo> inputDevices_;
-    AudioDeviceInfo currentDevice_;
-    std::function<void(const float*, int)> audioCallback_;
-    std::function<void()> playbackFinishedCallback_;
-    int sampleRate_;
-    int channels_;
-    bool isRecording_;
+    class Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
+} // namespace audio
 } // namespace perfx 

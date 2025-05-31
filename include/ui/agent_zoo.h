@@ -2,10 +2,11 @@
 
 #include <QWidget>
 #include <QWebEngineView>
-#include <QPushButton>
 #include <QLabel>
 #include <QWebSocket>
 #include <QTimer>
+#include <QProgressBar>
+#include <QPushButton>
 
 namespace perfx {
 namespace ui {
@@ -29,6 +30,9 @@ private slots:
     void onWebSocketError(QAbstractSocket::SocketError error);
     void onWebSocketMessage(const QString& message);
     void onHeartbeatTimeout();
+    void onLoadProgress(int progress);
+    void onLoadFinished(bool ok);
+    void onRefreshClicked();
 
 private:
     void setupUi();
@@ -40,11 +44,13 @@ private:
     QLabel* statusLabel_;
     QWebSocket* webSocket_;
     QTimer* heartbeatTimer_;
+    bool isConnected_;
     QString serverUrl_;
     QString accessToken_;
     QString deviceId_;
     QString clientId_;
-    bool isConnected_;
+    QProgressBar* progressBar_;
+    QPushButton* refreshButton_;
 };
 
 } // namespace ui
