@@ -45,6 +45,7 @@ PerfXAgent Cloud设计的理念是，将多模态MaaS接入，Agent这些功能�
 - FFMPEG (libavcodec, libavformat, libavutil, libswresample)
 - Boost (>= 1.74.0)
 - OpenSSL (>= 3.0.0)
+- OpenCV (>= 4.5.0)
 
 ### 编译步骤
 1. 克隆仓库并进入项目目录：
@@ -71,7 +72,7 @@ PerfXAgent Cloud设计的理念是，将多模态MaaS接入，Agent这些功能�
 
 5. 编译完成后，可执行文件位于 `build/bin/` 目录下。
 
-## AUDIO 子模块和示例
+## 子模块和示例
 
 ### AUDIO 子模块
 AUDIO 子模块是一个静态库，包含以下文件：
@@ -83,4 +84,23 @@ AUDIO 子模块是一个静态库，包含以下文件：
 - `audio_example`：使用 AUDIO 子模块的完整示例，位于 `examples/audio/audio_example.cpp`。
 - `pa_record_example`：使用 PortAudio 的简单录音示例，位于 `examples/audio/pa_record_example.cpp`。
 
-编译完成后，这两个示例程序位于 `build/bin/` 目录下，可以直接运行。
+### CAMERA 子模块
+CAMERA 子模块是一个静态库，提供摄像头设备管理和图像处理功能：
+- 设备枚举和配置
+- 实时预览
+- 图像捕获和保存
+- 图像旋转处理
+
+包含以下文件：
+- 源文件：`src/camera/camera_device.cpp`, `src/camera/camera_manager.cpp`
+- 头文件：`include/camera/camera_types.h`, `include/camera/camera_device.h`, `include/camera/camera_manager.h`
+
+### 摄像头示例
+项目包含一个摄像头示例程序：
+- `camera_example`：使用 CAMERA 子模块的完整示例，位于 `examples/camera/camera_example.cpp`。
+  - 支持设备枚举和预览
+  - 支持拍照和保存
+  - 支持图像旋转
+  - 使用 Qt 实现图形界面
+
+编译完成后，所有示例程序位于 `build/bin/` 目录下，可以直接运行。
