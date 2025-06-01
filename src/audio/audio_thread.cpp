@@ -1,3 +1,8 @@
+/**
+ * @file audio_thread.cpp
+ * @brief 实现音频线程的核心功能，包括音频流的初始化和处理
+ */
+
 #include "../../include/audio/audio_thread.h"
 #include "../../include/audio/audio_device.h"
 #include "../../include/audio/audio_processor.h"
@@ -11,20 +16,40 @@
 namespace perfx {
 namespace audio {
 
+/**
+ * @class AudioThread::Impl
+ * @brief AudioThread类的PIMPL实现，封装了音频处理的核心功能
+ */
 class AudioThread::Impl {
 public:
+    /**
+     * @brief 构造函数，初始化音频处理相关的成员变量
+     */
     Impl() : stream_(nullptr), running_(false), hasInputDevice_(false), hasOutputDevice_(false),
              resamplingEnabled_(false), resamplingProcessor_(nullptr) {}
 
+    /**
+     * @brief 析构函数，确保在对象销毁时停止音频流
+     */
     ~Impl() {
         stop();
     }
 
+    /**
+     * @brief 初始化音频配置
+     * @param config 音频配置参数
+     * @return 初始化是否成功
+     */
     bool initialize(const AudioConfig& config) {
         config_ = config;
         return true;
     }
 
+    /**
+     * @brief 启动音频流
+     * @return 启动是否成功
+     * @throws std::runtime_error 当音频流启动失败时抛出异常
+     */
     bool start() {
         if (running_) return true;
 
@@ -37,6 +62,7 @@ public:
             }
         }
 
+        // 打开音频流
         PaError err = Pa_OpenStream(
             &stream_,
             hasInputDevice_ ? &inputParams_ : nullptr,
@@ -52,6 +78,7 @@ public:
             throw std::runtime_error("Failed to open stream: " + std::string(Pa_GetErrorText(err)));
         }
 
+        // 启动音频流
         err = Pa_StartStream(stream_);
         if (err != paNoError) {
             Pa_CloseStream(stream_);
@@ -63,6 +90,9 @@ public:
         return true;
     }
 
+    /**
+     * @brief 停止音频流并清理资源
+     */
     void stop() {
         if (!running_) return;
 
@@ -80,6 +110,11 @@ public:
         running_ = false;
     }
 
+    /**
+     * @brief 设置输入设备
+     * @param device 输入设备信息
+     * @return 设置是否成功
+     */
     bool setInputDevice(const DeviceInfo& device) {
         if (running_) return false;
 
@@ -94,6 +129,11 @@ public:
         return true;
     }
 
+    /**
+     * @brief 设置输出设备
+     * @param device 输出设备信息
+     * @return 设置是否成功
+     */
     bool setOutputDevice(const DeviceInfo& device) {
         if (running_) return false;
 
@@ -108,14 +148,27 @@ public:
         return true;
     }
 
+    /**
+     * @brief 添加音频处理器
+     * @param processor 音频处理器实例
+     */
     void addProcessor(std::shared_ptr<AudioProcessor> processor) {
         processors_.push_back(processor);
     }
 
+    /**
+     * @brief 设置输入回调函数
+     * @param callback 输入回调函数
+     */
     void setInputCallback(AudioCallback callback) {
         inputCallback_ = std::move(callback);
     }
 
+    /**
+     * @brief 启用重采样功能
+     * @param targetRate 目标采样率
+     * @return 启用是否成功
+     */
     bool enableResampling(SampleRate targetRate) {
         if (running_) return false;
 
@@ -125,6 +178,9 @@ public:
         return resamplingProcessor_->initialize(config_);
     }
 
+    /**
+     * @brief 禁用重采样功能
+     */
     void disableResampling() {
         if (running_) return;
 
@@ -132,15 +188,33 @@ public:
         resamplingProcessor_.reset();
     }
 
+    /**
+     * @brief 获取音频流运行状态
+     * @return 是否正在运行
+     */
     bool isRunning() const {
         return running_;
     }
 
+    /**
+     * @brief 获取当前音频配置
+     * @return 当前音频配置
+     */
     AudioConfig getCurrentConfig() const {
         return config_;
     }
 
 private:
+    /**
+     * @brief PortAudio回调函数，处理音频数据的输入和输出
+     * @param input 输入音频数据
+     * @param output 输出音频数据
+     * @param frameCount 帧数
+     * @param timeInfo 时间信息
+     * @param statusFlags 状态标志
+     * @param userData 用户数据
+     * @return 回调状态
+     */
     static int audioCallback(const void* input, void* output,
                            unsigned long frameCount,
                            const PaStreamCallbackTimeInfo* /*timeInfo*/,
@@ -148,7 +222,7 @@ private:
                            void* userData) {
         auto* impl = static_cast<Impl*>(userData);
         
-        // 处理输入
+        // 处理输入音频数据
         if (input) {
             if (impl->resamplingEnabled_ && impl->resamplingProcessor_) {
                 // 分配重采样输出缓冲区
@@ -156,7 +230,7 @@ private:
                 std::vector<float> resampledData(frameCount * samplesPerFrame);
                 size_t outputFrames = frameCount;
 
-                // 执行重采样
+                // 执行重采样处理
                 if (impl->resamplingProcessor_->processResampling(
                     input, frameCount, resampledData.data(), outputFrames)) {
                     // 调用用户回调，传入重采样后的数据
@@ -172,7 +246,7 @@ private:
             }
         }
 
-        // 处理输出
+        // 处理输出音频数据
         if (output) {
             // 这里可以添加输出处理逻辑
         }
@@ -180,25 +254,26 @@ private:
         return paContinue;
     }
 
-    PaStream* stream_;
-    bool running_;
-    bool hasInputDevice_;
-    bool hasOutputDevice_;
-    AudioConfig config_;
-    DeviceInfo inputDevice_;
-    DeviceInfo outputDevice_;
-    PaStreamParameters inputParams_;
-    PaStreamParameters outputParams_;
-    std::vector<std::shared_ptr<AudioProcessor>> processors_;
-    AudioCallback inputCallback_;
+    // 成员变量
+    PaStream* stream_;                                    ///< PortAudio流指针
+    bool running_;                                        ///< 运行状态标志
+    bool hasInputDevice_;                                 ///< 是否有输入设备
+    bool hasOutputDevice_;                                ///< 是否有输出设备
+    AudioConfig config_;                                  ///< 音频配置
+    DeviceInfo inputDevice_;                              ///< 输入设备信息
+    DeviceInfo outputDevice_;                             ///< 输出设备信息
+    PaStreamParameters inputParams_;                      ///< 输入流参数
+    PaStreamParameters outputParams_;                     ///< 输出流参数
+    std::vector<std::shared_ptr<AudioProcessor>> processors_; ///< 音频处理器列表
+    AudioCallback inputCallback_;                         ///< 输入回调函数
 
     // 重采样相关
-    bool resamplingEnabled_;
-    int targetSampleRate_;
-    std::shared_ptr<AudioProcessor> resamplingProcessor_;
+    bool resamplingEnabled_;                              ///< 重采样启用标志
+    int targetSampleRate_;                                ///< 目标采样率
+    std::shared_ptr<AudioProcessor> resamplingProcessor_; ///< 重采样处理器
 };
 
-// AudioThread implementation
+// AudioThread类实现
 AudioThread::AudioThread() : impl_(std::make_unique<Impl>()) {}
 AudioThread::~AudioThread() = default;
 

@@ -1,5 +1,6 @@
 #include "../../include/audio/audio_processor.h"
 #include <opus/opus.h>
+#include <ogg/ogg.h>
 extern "C" {
 #include <libswresample/swresample.h>
 #include <libavutil/opt.h>
@@ -14,26 +15,12 @@ extern "C" {
 namespace perfx {
 namespace audio {
 
-// WAV 文件头结构
-struct WavHeader {
-    char riff[4];        // "RIFF"
-    uint32_t size;       // 文件大小 - 8
-    char wave[4];        // "WAVE"
-    char fmt[4];         // "fmt "
-    uint32_t fmtSize;    // fmt 块大小
-    uint16_t format;     // 1 = PCM
-    uint16_t channels;   // 声道数
-    uint32_t sampleRate; // 采样率
-    uint32_t byteRate;   // 每秒字节数
-    uint16_t blockAlign; // 块对齐
-    uint16_t bitsPerSample; // 位深度
-    char data[4];        // "data"
-    uint32_t dataSize;   // 数据大小
-};
-
 class AudioProcessor::Impl {
 public:
-    Impl() : opusEncoder_(nullptr), opusDecoder_(nullptr), swrCtx_(nullptr) {}
+    Impl() : opusEncoder_(nullptr), opusDecoder_(nullptr), swrCtx_(nullptr) {
+        encodingFormat_ = EncodingFormat::WAV;
+        opusFrameLength_ = 20;
+    }
 
     ~Impl() {
         cleanup();
@@ -42,33 +29,47 @@ public:
     bool initialize(const AudioConfig& config) {
         cleanup();
         config_ = config;
+        encodingFormat_ = config.encodingFormat;
+        opusFrameLength_ = config.opusFrameLength;
 
         // 打印配置信息，用于调试
         std::cout << "AudioProcessor initialized with:" << std::endl;
         std::cout << "- Sample Rate: " << static_cast<int>(config_.sampleRate) << " Hz" << std::endl;
         std::cout << "- Channels: " << (config_.channels == ChannelCount::MONO ? "MONO" : "STEREO") << std::endl;
         std::cout << "- Format: " << (config_.format == SampleFormat::FLOAT32 ? "FLOAT32" : "INT16") << std::endl;
+        std::cout << "- Encoding Format: " << (encodingFormat_ == EncodingFormat::WAV ? "WAV" : "OPUS") << std::endl;
+        if (encodingFormat_ == EncodingFormat::OPUS) {
+            std::cout << "- OPUS Frame Length: " << opusFrameLength_ << "ms" << std::endl;
+        }
 
         // 初始化 Opus 编码器
         int error;
         opusEncoder_ = opus_encoder_create(
-            static_cast<int>(config.sampleRate),
+            static_cast<int>(config.sampleRate),  // 使用配置的采样率
             static_cast<int>(config.channels),
             OPUS_APPLICATION_VOIP,
             &error
         );
         if (error != OPUS_OK || !opusEncoder_) {
-            throw std::runtime_error("Failed to create Opus encoder");
+            std::cerr << "Failed to create Opus encoder: " << opus_strerror(error) << std::endl;
+            return false;
         }
+
+        // 设置 Opus 编码器参数
+        opus_encoder_ctl(opusEncoder_, OPUS_SET_BITRATE(OPUS_AUTO));
+        opus_encoder_ctl(opusEncoder_, OPUS_SET_COMPLEXITY(10));
+        opus_encoder_ctl(opusEncoder_, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+        opus_encoder_ctl(opusEncoder_, OPUS_SET_APPLICATION(OPUS_APPLICATION_VOIP));
 
         // 初始化 Opus 解码器
         opusDecoder_ = opus_decoder_create(
-            static_cast<int>(config.sampleRate),
+            static_cast<int>(config.sampleRate),  // 使用配置的采样率
             static_cast<int>(config.channels),
             &error
         );
         if (error != OPUS_OK || !opusDecoder_) {
-            throw std::runtime_error("Failed to create Opus decoder");
+            std::cerr << "Failed to create Opus decoder: " << opus_strerror(error) << std::endl;
+            return false;
         }
 
         return true;
@@ -182,6 +183,7 @@ public:
         );
 
         if (encodedBytes < 0) {
+            std::cerr << "Opus encoding error: " << opus_strerror(encodedBytes) << std::endl;
             return false;
         }
 
@@ -211,83 +213,16 @@ public:
         return true;
     }
 
-    bool writeWav(const void* input, size_t frames, const std::string& filename) {
-        if (!input || frames == 0) return false;
-
-        std::ofstream file(filename, std::ios::binary);
-        if (!file) return false;
-
-        // 准备 WAV 头
-        WavHeader header = {};
-        memcpy(header.riff, "RIFF", 4);
-        memcpy(header.wave, "WAVE", 4);
-        memcpy(header.fmt, "fmt ", 4);
-        memcpy(header.data, "data", 4);
-
-        header.fmtSize = 16;
-        header.format = 1; // PCM
-        header.channels = static_cast<uint16_t>(config_.channels);
-        header.sampleRate = static_cast<uint32_t>(config_.sampleRate);
-        header.bitsPerSample = 16; // 16-bit PCM
-        header.blockAlign = header.channels * header.bitsPerSample / 8;
-        header.byteRate = header.sampleRate * header.blockAlign;
-        
-        // 计算数据大小：帧数 * 每帧字节数
-        size_t bytesPerFrame = header.channels * header.bitsPerSample / 8;
-        header.dataSize = frames * bytesPerFrame;
-        header.size = header.dataSize + sizeof(WavHeader) - 8;
-
-        // 写入头
-        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-
-        // 转换为 16-bit PCM 并写入
-        std::vector<int16_t> pcmData(frames * static_cast<int>(config_.channels));
-        convertToInt16(input, pcmData.data(), frames);
-        
-        // 验证数据大小
-        if (pcmData.size() * sizeof(int16_t) != header.dataSize) {
-            std::cerr << "Warning: Data size mismatch. Expected " << header.dataSize 
-                      << " bytes, but got " << (pcmData.size() * sizeof(int16_t)) << " bytes" << std::endl;
-        }
-        
-        file.write(reinterpret_cast<const char*>(pcmData.data()), pcmData.size() * sizeof(int16_t));
-
-        return true;
-    }
-
-    bool readWav(const std::string& filename, std::vector<float>& output, size_t& frames) {
-        std::ifstream file(filename, std::ios::binary);
-        if (!file) return false;
-
-        // 读取 WAV 头
-        WavHeader header;
-        file.read(reinterpret_cast<char*>(&header), sizeof(header));
-
-        // 验证 WAV 格式
-        if (memcmp(header.riff, "RIFF", 4) != 0 ||
-            memcmp(header.wave, "WAVE", 4) != 0 ||
-            memcmp(header.fmt, "fmt ", 4) != 0 ||
-            memcmp(header.data, "data", 4) != 0 ||
-            header.format != 1) {
-            return false;
-        }
-
-        // 读取数据
-        std::vector<int16_t> pcmData(header.dataSize / sizeof(int16_t));
-        file.read(reinterpret_cast<char*>(pcmData.data()), header.dataSize);
-
-        // 转换为 float
-        frames = pcmData.size() / header.channels;
-        output.resize(pcmData.size());
-        for (size_t i = 0; i < pcmData.size(); ++i) {
-            output[i] = pcmData[i] / 32768.0f;
-        }
-
-        return true;
-    }
-
     AudioConfig getProcessedConfig() const {
         return config_;
+    }
+
+    void setEncodingFormat(EncodingFormat format) {
+        encodingFormat_ = format;
+    }
+
+    void setOpusFrameLength(int frameLength) {
+        opusFrameLength_ = frameLength;
     }
 
 private:
@@ -321,6 +256,8 @@ private:
     OpusDecoder* opusDecoder_;
     SwrContext* swrCtx_;
     AudioConfig config_;
+    EncodingFormat encodingFormat_;
+    int opusFrameLength_;
 };
 
 // AudioProcessor implementation
@@ -342,17 +279,19 @@ bool AudioProcessor::encodeOpus(const void* input, size_t frames, std::vector<ui
 bool AudioProcessor::decodeOpus(const std::vector<uint8_t>& input, void* output, size_t& outputFrames) {
     return impl_->decodeOpus(input, output, outputFrames);
 }
-bool AudioProcessor::writeWav(const void* input, size_t frames, const std::string& filename) {
-    return impl_->writeWav(input, frames, filename);
-}
-bool AudioProcessor::readWav(const std::string& filename, std::vector<float>& output, size_t& frames) {
-    return impl_->readWav(filename, output, frames);
-}
 AudioConfig AudioProcessor::getProcessedConfig() const { return impl_->getProcessedConfig(); }
 bool AudioProcessor::resample(const void* input, size_t inputFrames,
                             void* output, size_t outputFrames,
                             SampleRate fromRate, SampleRate toRate) {
     return impl_->resample(input, inputFrames, output, outputFrames, fromRate, toRate);
+}
+
+void AudioProcessor::setEncodingFormat(EncodingFormat format) {
+    impl_->setEncodingFormat(format);
+}
+
+void AudioProcessor::setOpusFrameLength(int frameLength) {
+    impl_->setOpusFrameLength(frameLength);
 }
 
 } // namespace audio

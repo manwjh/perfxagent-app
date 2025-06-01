@@ -6,6 +6,7 @@
 #include "audio_thread.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 namespace perfx {
@@ -41,6 +42,12 @@ public:
     
     // 清理资源
     void cleanup();
+
+    // 文件操作相关函数
+    bool writeWavFile(const void* input, size_t frames, const std::string& filename);
+    bool writeOpusFile(const void* input, size_t frames, const std::string& filename);
+    bool readWavFile(const std::string& filename, std::vector<float>& output, size_t& frames);
+    std::string generateOutputFilename(const std::string& format, int sampleRate, ChannelCount channels);
 
 private:
     AudioManager();

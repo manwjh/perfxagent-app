@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
+#include <opus/opus.h>
+#include <ogg/ogg.h>
 
 // Default audio parameters
 #define DEFAULT_SAMPLE_RATE SampleRate::RATE_48000
@@ -92,12 +94,19 @@ std::string getExecutableDir() {
 // Helper function to generate output filename
 std::string generateOutputFilename(const std::string& format, int sampleRate, ChannelCount channels) {
     std::string channelStr = (channels == ChannelCount::MONO) ? "mono" : "stereo";
-    std::string extension = (format == "WAV") ? "wav" : "raw";
+    std::string extension = (format == "WAV") ? "wav" : "ogg";
     return std::string("recording_") + std::to_string(sampleRate) + "hz_" + channelStr + "." + extension;
 }
 
 // 录音模块：将输入设备音频数据写入文件
-void recordToFile(AudioManager& manager, const DeviceInfo& deviceToUse, const AudioConfig& config, const std::string& outputFile) {
+void recordToFile(AudioManager& manager, const DeviceInfo& deviceToUse, const AudioConfig& config, 
+                 const std::string& outputFile, EncodingFormat format, int opusFrameLength = 20) {
+    // 更新 AudioManager 的配置
+    if (!manager.updateConfig(config)) {
+        std::cerr << "Failed to update audio manager configuration" << std::endl;
+        return;
+    }
+
     // 创建音频线程
     auto audioThread = manager.createAudioThread(config);
     if (!audioThread) {
@@ -115,6 +124,12 @@ void recordToFile(AudioManager& manager, const DeviceInfo& deviceToUse, const Au
     auto processor = manager.getProcessor();
     processor->initialize(config);  // 确保处理器使用正确的配置
     audioThread->addProcessor(processor);
+
+    // 设置编码格式
+    if (format == EncodingFormat::OPUS) {
+        processor->setEncodingFormat(EncodingFormat::OPUS);
+        processor->setOpusFrameLength(opusFrameLength);
+    }
 
     // 设置输入回调
     std::vector<float> recordedAudio;
@@ -136,13 +151,67 @@ void recordToFile(AudioManager& manager, const DeviceInfo& deviceToUse, const Au
 
     // 保存录音
     if (!recordedAudio.empty()) {
-        if (processor->writeWav(recordedAudio.data(), recordedAudio.size() / static_cast<int>(config.channels), outputFile)) {
+        bool success = false;
+        if (format == EncodingFormat::WAV) {
+            success = manager.writeWavFile(recordedAudio.data(), 
+                                         recordedAudio.size() / static_cast<int>(config.channels), 
+                                         outputFile);
+        } else {
+            success = manager.writeOpusFile(recordedAudio.data(), 
+                                          recordedAudio.size() / static_cast<int>(config.channels), 
+                                          outputFile);
+        }
+
+        if (success) {
             std::cout << "Recording saved to " << outputFile << std::endl;
         } else {
             std::cerr << "Failed to save recording" << std::endl;
         }
     } else {
         std::cerr << "No audio data recorded" << std::endl;
+    }
+}
+
+// Helper function to get encoding format from user
+EncodingFormat getEncodingFormatFromUser() {
+    int choice;
+    std::cout << "\nSelect encoding format:\n";
+    std::cout << "1. WAV\n";
+    std::cout << "2. OPUS\n";
+    std::cout << "Enter your choice (1-2): ";
+    std::cin >> choice;
+
+    switch (choice) {
+        case 1:
+            return EncodingFormat::WAV;
+        case 2:
+            return EncodingFormat::OPUS;
+        default:
+            std::cout << "Invalid choice, using default (WAV)\n";
+            return EncodingFormat::WAV;
+    }
+}
+
+// Helper function to get Opus frame length from user
+int getOpusFrameLength() {
+    int choice;
+    std::cout << "\nSelect Opus frame length (ms):\n";
+    std::cout << "1. 20ms (default)\n";
+    std::cout << "2. 40ms\n";
+    std::cout << "3. 60ms\n";
+    std::cout << "Enter your choice (1-3): ";
+    std::cin >> choice;
+
+    switch (choice) {
+        case 1:
+            return 20;
+        case 2:
+            return 40;
+        case 3:
+            return 60;
+        default:
+            std::cout << "Invalid choice, using default (20ms)\n";
+            return 20;
     }
 }
 
@@ -263,13 +332,14 @@ int main() {
     config.inputDevice = deviceToUse;
 
     // 选择输出格式
-    int formatChoice;
-    std::cout << "Select output format:\n";
-    std::cout << "1. WAV\n";
-    std::cout << "2. RAW\n";
-    std::cout << "Choice (1-2): ";
-    std::cin >> formatChoice;
-    std::string outputFormat = (formatChoice == 2) ? "RAW" : "WAV";
+    EncodingFormat selectedFormat = getEncodingFormatFromUser();
+    std::string outputFormat = (selectedFormat == EncodingFormat::WAV) ? "WAV" : "OPUS";
+
+    // 如果是OPUS格式，获取帧长度
+    int opusFrameLength = 20; // 默认值
+    if (selectedFormat == EncodingFormat::OPUS) {
+        opusFrameLength = getOpusFrameLength();
+    }
 
     // 生成包含采样率和通道信息的输出文件名
     std::string outputFile = generateOutputFilename(outputFormat, 
@@ -282,13 +352,16 @@ int main() {
     std::cout << "- Channels: " << (config.channels == ChannelCount::MONO ? "Mono" : "Stereo") << "\n";
     std::cout << "- Format: PCM 16-bit\n";
     std::cout << "- Output Format: " << outputFormat << std::endl;
+    if (selectedFormat == EncodingFormat::OPUS) {
+        std::cout << "- OPUS Frame Length: " << opusFrameLength << "ms" << std::endl;
+    }
     
     std::cout << "\nPress Enter to start recording..." << std::endl;
     std::cin.ignore(); // 清除上次输入残留
     std::cin.get();
 
     std::cout << "Recording... Press Enter to stop." << std::endl;
-    recordToFile(manager, selectedDevice, config, outputFile);
+    recordToFile(manager, selectedDevice, config, outputFile, selectedFormat, opusFrameLength);
 
     return 0;
 } 

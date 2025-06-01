@@ -45,12 +45,24 @@ if(APPLE)
         OUTPUT_VARIABLE BOOST_PREFIX
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
+    execute_process(
+        COMMAND brew --prefix opus
+        OUTPUT_VARIABLE OPUS_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND brew --prefix libogg
+        OUTPUT_VARIABLE OGG_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     
     set(CMAKE_PREFIX_PATH 
         ${CMAKE_PREFIX_PATH} 
         "${QT6_PREFIX}"
         "${OPENSSL_PREFIX}"
         "${PORTAUDIO_PREFIX}"
+        "${OPUS_PREFIX}"
+        "${OGG_PREFIX}"
     )
     set(Qt6_DIR "${QT6_PREFIX}/lib/cmake/Qt6")
     set(BOOST_ROOT "${BOOST_PREFIX}")
@@ -96,6 +108,7 @@ find_package(Qt6 6.4.0 COMPONENTS
 
 find_package(PortAudio 19.7.0 REQUIRED)
 find_package(Opus REQUIRED)
+find_package(Ogg REQUIRED)
 find_package(WebRTC QUIET)
 find_package(SAMPLERATE REQUIRED)
 find_package(nlohmann_json 3.11.3 REQUIRED)
@@ -208,7 +221,6 @@ set(AUDIO_SOURCES
     src/audio/audio_processor.cpp
     src/audio/audio_thread.cpp
     src/audio/audio_manager.cpp
-    src/audio/audio_types.cpp
 )
 
 # 添加音频库头文件
@@ -230,6 +242,7 @@ target_include_directories(perfx_audio PUBLIC
     ${PortAudio_INCLUDE_DIRS}
     ${PORTAUDIO_PREFIX}/include
     ${Opus_INCLUDE_DIRS}
+    ${Ogg_INCLUDE_DIRS}
     $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
     ${SAMPLERATE_INCLUDE_DIRS}
 )
@@ -238,6 +251,7 @@ target_include_directories(perfx_audio PUBLIC
 target_link_libraries(perfx_audio PUBLIC
     ${PortAudio_LIBRARIES}
     ${Opus_LIBRARIES}
+    ${Ogg_LIBRARIES}
     $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_LIBRARIES}>
     ${SAMPLERATE_LIBRARIES}
     nlohmann_json::nlohmann_json
