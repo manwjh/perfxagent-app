@@ -23,12 +23,6 @@ public:
     // 获取所有可用的音频设备
     std::vector<DeviceInfo> getAvailableDevices();
     
-    // 获取默认输入设备
-    DeviceInfo getDefaultInputDevice();
-    
-    // 获取默认输出设备
-    DeviceInfo getDefaultOutputDevice();
-    
     // 打开输入设备
     bool openInputDevice(const DeviceInfo& device, const AudioConfig& config);
     

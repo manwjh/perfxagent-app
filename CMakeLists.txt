@@ -1,9 +1,14 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.16)
 
-project(perfxagent-app)
+project(perfxagent-app VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 添加调试标志
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
 
 # 设置版本号
 set(PERFXAGENT_VERSION_MAJOR 1)
@@ -55,6 +60,11 @@ if(APPLE)
         OUTPUT_VARIABLE OGG_PREFIX
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
+    execute_process(
+        COMMAND brew --prefix nlohmann-json
+        OUTPUT_VARIABLE NLOHMANN_JSON_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     
     set(CMAKE_PREFIX_PATH 
         ${CMAKE_PREFIX_PATH} 
@@ -63,6 +73,7 @@ if(APPLE)
         "${PORTAUDIO_PREFIX}"
         "${OPUS_PREFIX}"
         "${OGG_PREFIX}"
+        "${NLOHMANN_JSON_PREFIX}"
     )
     set(Qt6_DIR "${QT6_PREFIX}/lib/cmake/Qt6")
     set(BOOST_ROOT "${BOOST_PREFIX}")
@@ -70,6 +81,7 @@ if(APPLE)
     set(BOOST_LIBRARYDIR "${BOOST_PREFIX}/lib")
     include_directories(${PORTAUDIO_PREFIX}/include)
     include_directories(/opt/homebrew/opt/portaudio/include)
+    include_directories(${NLOHMANN_JSON_PREFIX}/include)
 endif()
 
 if(WIN32)
@@ -109,7 +121,8 @@ find_package(Qt6 6.4.0 COMPONENTS
 find_package(PortAudio 19.7.0 REQUIRED)
 find_package(Opus REQUIRED)
 find_package(Ogg REQUIRED)
-find_package(WebRTC QUIET)
+find_package(SndFile REQUIRED)
+# find_package(WebRTC QUIET)  # Temporarily disabled
 find_package(SAMPLERATE REQUIRED)
 find_package(nlohmann_json 3.11.3 REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -119,6 +132,7 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat
     libavutil
     libswresample
+    libswscale
 )
 # find_package(GTest REQUIRED)
 
@@ -161,8 +175,6 @@ set(SOURCES
     src/ui/hello_window.cpp
     src/audio/audio_device.cpp
     src/core/config_manager.cpp
-    src/connection/websocket_client.cpp
-    src/connection/websocket_message.cpp
     src/connection/thread_pool.cpp
     src/connection/connection_manager.cpp
     src/audio/audio_manager.cpp
@@ -178,8 +190,6 @@ set(HEADERS
     include/ui/hello_window.h
     include/audio/audio_device.h
     include/core/config_manager.h
-    include/connection/websocket_client.h
-    include/connection/websocket_message.h
     include/connection/thread_pool.h
     include/connection/connection_manager.h
     include/audio/audio_manager.h
@@ -241,20 +251,16 @@ target_include_directories(perfx_audio PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${PortAudio_INCLUDE_DIRS}
     ${PORTAUDIO_PREFIX}/include
-    ${Opus_INCLUDE_DIRS}
-    ${Ogg_INCLUDE_DIRS}
-    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
-    ${SAMPLERATE_INCLUDE_DIRS}
+    ${SndFile_INCLUDE_DIRS}
 )
 
 # 链接音频库依赖
-target_link_libraries(perfx_audio PUBLIC
+target_link_libraries(perfx_audio
     ${PortAudio_LIBRARIES}
     ${Opus_LIBRARIES}
     ${Ogg_LIBRARIES}
-    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_LIBRARIES}>
+    ${SndFile_LIBRARIES}
     ${SAMPLERATE_LIBRARIES}
-    nlohmann_json::nlohmann_json
     PkgConfig::FFMPEG
 )
 
@@ -268,16 +274,12 @@ endif()
 
 # 添加连接库源文件
 set(CONNECTION_SOURCES
-    src/connection/websocket_client.cpp
-    src/connection/websocket_message.cpp
     src/connection/thread_pool.cpp
     src/connection/connection_manager.cpp
 )
 
 # 添加连接库头文件
 set(CONNECTION_HEADERS
-    include/connection/websocket_client.h
-    include/connection/websocket_message.h
     include/connection/thread_pool.h
     include/connection/connection_manager.h
 )
@@ -417,4 +419,5 @@ enable_testing()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${PortAudio_INCLUDE_DIRS})
 include_directories(${Opus_INCLUDE_DIRS})
-include_directories(${SAMPLERATE_INCLUDE_DIRS}) 
+include_directories(${SAMPLERATE_INCLUDE_DIRS})
+include_directories(${nlohmann_json_INCLUDE_DIRS}) 

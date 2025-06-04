@@ -26,11 +26,13 @@ add_executable(perfxagent-app
     ui/agent_zoo.cpp
     ui/device_settings.cpp
     ui/hello_window.cpp
+    audio/audio_device.cpp
     core/config_manager.cpp
-    connection/websocket_client.cpp
-    connection/websocket_message.cpp
     connection/thread_pool.cpp
     connection/connection_manager.cpp
+    audio/audio_manager.cpp
+    camera/camera_device.cpp
+    camera/camera_manager.cpp
 )
 
 # 设置主应用程序的包含目录

@@ -65,7 +65,8 @@ void DeviceSettings::setupConnections() {
 
 void DeviceSettings::initializeAudioDevice() {
     auto& manager = AudioManager::getInstance();
-    if (!manager.initialize()) {
+    AudioConfig config = AudioConfig::getDefaultInputConfig();
+    if (!manager.initialize(config)) {
         QMessageBox::warning(this, "错误", "音频管理器初始化失败");
         return;
     }
@@ -112,9 +113,10 @@ void DeviceSettings::onTestButtonPressed() {
         return;
     }
     audioThread_->addProcessor(manager.getProcessor());
-    audioThread_->setInputCallback([this](const void* input, size_t frames) {
+    audioThread_->setInputCallback([this](const void* input, void* output, unsigned long frameCount) {
+        (void)output;  // 显式忽略未使用的参数
         const float* data = static_cast<const float*>(input);
-        size_t samples = frames * static_cast<int>(audioConfig_.channels);
+        size_t samples = frameCount * static_cast<int>(audioConfig_.channels);
         recordedAudio_.insert(recordedAudio_.end(), data, data + samples);
     });
     audioThread_->start();

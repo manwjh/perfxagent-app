@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <mutex>
+#include <iostream>
 
 namespace perfx {
 namespace audio {
@@ -103,50 +104,6 @@ public:
         return devices;
     }
 
-    /**
-     * @brief 获取默认输入设备
-     * @return 默认输入设备信息
-     * @throw std::runtime_error 如果没有找到默认输入设备
-     */
-    DeviceInfo getDefaultInputDevice() {
-        int deviceIndex = Pa_GetDefaultInputDevice();
-        if (deviceIndex == paNoDevice) {
-            throw std::runtime_error("No default input device found");
-        }
-
-        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIndex);
-        DeviceInfo info;
-        info.index = deviceIndex;
-        info.name = deviceInfo->name;
-        info.type = DeviceType::INPUT;
-        info.maxInputChannels = deviceInfo->maxInputChannels;
-        info.maxOutputChannels = deviceInfo->maxOutputChannels;
-        info.defaultSampleRate = deviceInfo->defaultSampleRate;
-        return info;
-    }
-
-    /**
-     * @brief 获取默认输出设备
-     * @return 默认输出设备信息
-     * @throw std::runtime_error 如果没有找到默认输出设备
-     */
-    DeviceInfo getDefaultOutputDevice() {
-        int deviceIndex = Pa_GetDefaultOutputDevice();
-        if (deviceIndex == paNoDevice) {
-            throw std::runtime_error("No default output device found");
-        }
-
-        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIndex);
-        DeviceInfo info;
-        info.index = deviceIndex;
-        info.name = deviceInfo->name;
-        info.type = DeviceType::OUTPUT;
-        info.maxInputChannels = deviceInfo->maxInputChannels;
-        info.maxOutputChannels = deviceInfo->maxOutputChannels;
-        info.defaultSampleRate = deviceInfo->defaultSampleRate;
-        return info;
-    }
-
     //--------------------------------------------------------------------------
     // 设备操作
     //--------------------------------------------------------------------------
@@ -161,18 +118,40 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         try {
             if (stream_) {
-                closeDevice();
+                lastError_ = "Device is already open";
+                return false;
+            }
+
+            // 验证设备
+            const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(device.index);
+            if (!deviceInfo) {
+                lastError_ = "Invalid device index: " + std::to_string(device.index);
+                return false;
+            }
+
+            // 验证设备配置
+            if (deviceInfo->maxInputChannels < static_cast<int>(config.channels)) {
+                lastError_ = "Device does not support requested number of channels";
+                return false;
             }
 
             // 配置输入参数
             PaStreamParameters inputParameters;
             inputParameters.device = device.index;
             inputParameters.channelCount = static_cast<int>(config.channels);
-            inputParameters.sampleFormat = getPaSampleFormat(config.format);
-            inputParameters.suggestedLatency = Pa_GetDeviceInfo(device.index)->defaultLowInputLatency;
+            inputParameters.sampleFormat = paInt16;  // 使用16位整数格式
+            inputParameters.suggestedLatency = deviceInfo->defaultLowInputLatency;
             inputParameters.hostApiSpecificStreamInfo = nullptr;
 
             // 打开音频流
+            std::cout << "[DEBUG] Opening audio stream with device: " << device.name << std::endl;
+            std::cout << "[DEBUG] Stream parameters:" << std::endl;
+            std::cout << "  - Device index: " << inputParameters.device << std::endl;
+            std::cout << "  - Channels: " << inputParameters.channelCount << std::endl;
+            std::cout << "  - Sample format: " << inputParameters.sampleFormat << std::endl;
+            std::cout << "  - Sample rate: " << static_cast<double>(config.sampleRate) << std::endl;
+            std::cout << "  - Frames per buffer: " << config.framesPerBuffer << std::endl;
+
             PaStream* rawStream = nullptr;
             PaError err = Pa_OpenStream(&rawStream,
                                       &inputParameters,
@@ -250,6 +229,7 @@ public:
                 return false;
             }
             
+            std::cout << "[DEBUG] Starting audio stream..." << std::endl;
             PaError err = Pa_StartStream(stream_.get());
             if (err != paNoError) {
                 lastError_ = "Failed to start stream: " + std::string(Pa_GetErrorText(err));
@@ -268,20 +248,33 @@ public:
      * @throw std::runtime_error 如果停止失败
      */
     bool stopStream() {
-        if (!stream_) return false;
-        
-        PaError err = Pa_StopStream(stream_.get());
-        if (err != paNoError) {
-            throw std::runtime_error("Failed to stop stream: " + std::string(Pa_GetErrorText(err)));
+        std::lock_guard<std::mutex> lock(mutex_);
+        try {
+            if (!stream_) {
+                lastError_ = "No active stream";
+                return false;
+            }
+            
+            std::cout << "[DEBUG] Stopping audio stream..." << std::endl;
+            PaError err = Pa_StopStream(stream_.get());
+            if (err != paNoError) {
+                lastError_ = "Failed to stop stream: " + std::string(Pa_GetErrorText(err));
+                return false;
+            }
+            return true;
+        } catch (const std::exception& e) {
+            lastError_ = e.what();
+            return false;
         }
-        return true;
     }
 
     /**
      * @brief 关闭当前设备
      */
     void closeDevice() {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (stream_) {
+            std::cout << "[DEBUG] Closing audio stream..." << std::endl;
             Pa_CloseStream(stream_.get());
             stream_.reset();
         }
@@ -405,8 +398,6 @@ AudioDevice::~AudioDevice() = default;
 
 bool AudioDevice::initialize() { return impl_->initialize(); }
 std::vector<DeviceInfo> AudioDevice::getAvailableDevices() { return impl_->getAvailableDevices(); }
-DeviceInfo AudioDevice::getDefaultInputDevice() { return impl_->getDefaultInputDevice(); }
-DeviceInfo AudioDevice::getDefaultOutputDevice() { return impl_->getDefaultOutputDevice(); }
 bool AudioDevice::openInputDevice(const DeviceInfo& device, const AudioConfig& config) { return impl_->openInputDevice(device, config); }
 bool AudioDevice::openOutputDevice(const DeviceInfo& device, const AudioConfig& config) { return impl_->openOutputDevice(device, config); }
 bool AudioDevice::startStream() { return impl_->startStream(); }
@@ -422,40 +413,6 @@ std::string AudioDevice::getLastError() const { return impl_->getLastError(); }
 //==============================================================================
 // 其他相关类实现
 //==============================================================================
-
-/**
- * @class AudioProcessor
- * @brief 音频处理器类
- * @details 负责音频数据的处理
- */
-class AudioProcessor {
-private:
-    std::mutex mutex_;  // 互斥锁，保护共享资源
-    // ... 其他成员变量
-
-public:
-    /**
-     * @brief 处理音频数据
-     * @return 处理是否成功
-     */
-    bool processAudio() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // ... 处理逻辑
-        return true;
-    }
-};
-
-/**
- * @class AudioThread
- * @brief 音频线程类
- * @details 管理多个音频处理器
- */
-class AudioThread {
-private:
-    std::vector<std::shared_ptr<AudioProcessor>> processors_;  // 音频处理器列表
-    std::mutex processorsMutex_;  // 互斥锁，保护处理器列表
-    // ... 其他成员变量
-};
 
 } // namespace audio
 } // namespace perfx 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include "audio_types.h"
 #include "audio_device.h"
 #include "audio_processor.h"
@@ -9,25 +10,24 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <functional>
 
 namespace perfx {
 namespace audio {
 
 class AudioProcessor;
+struct DeviceInfo;
+struct AudioConfig;
 
 class AudioThread {
 public:
-    using AudioCallback = std::function<void(const void* input, size_t frames)>;
-
     AudioThread();
     ~AudioThread();
 
     // 初始化线程
-    bool initialize(const AudioConfig& config);
+    bool initialize(AudioProcessor* processor);
     
     // 启动音频处理线程
-    bool start();
+    void start();
     
     // 停止音频处理线程
     void stop();
@@ -53,6 +53,8 @@ public:
     // 重采样相关函数
     bool enableResampling(SampleRate targetRate);
     void disableResampling();
+
+    bool startRecording();
 
 private:
     class Impl;
