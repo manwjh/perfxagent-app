@@ -17,6 +17,8 @@
 #include <portaudio.h>
 #include <mutex>
 #include <filesystem>
+#include <thread>
+#include <chrono>
 
 namespace perfx {
 namespace audio {
@@ -39,6 +41,7 @@ public:
      * 清理资源
      */
     ~Impl() {
+        std::cout << "[DEBUG] ~AudioManager::Impl called" << std::endl;
         cleanup();
     }
 
@@ -47,90 +50,111 @@ public:
      * @return 初始化是否成功
      */
     bool initialize(const AudioConfig& config) {
+        std::cout << "[DEBUG] Entering AudioManager::initialize" << std::endl;
         config_ = config;
+
+        // 检查是否已经初始化
         if (initialized_) {
+            std::cout << "[DEBUG] AudioManager::initialize: already initialized, returning true" << std::endl;
             return true;
         }
 
-        // 初始化 PortAudio
+        // 1. 初始化 PortAudio 库
         PaError err = Pa_Initialize();
         if (err != paNoError) {
             std::cerr << "PortAudio initialization failed: " << Pa_GetErrorText(err) << std::endl;
             return false;
         }
 
+        // 2. 创建并初始化音频设备
+        device_ = std::make_unique<AudioDevice>();
+        if (!device_->initialize()) {
+            std::cerr << "Failed to initialize audio device" << std::endl;
+            device_.reset();  // 清理设备资源
+            Pa_Terminate();   // 清理 PortAudio
+            return false;
+        }
+
+        // 3. 打开输入设备
+        if (!device_->openInputDevice(config.inputDevice, config)) {
+            std::cerr << "Failed to open input device: " << device_->getLastError() << std::endl;
+            device_.reset();  // 清理设备资源
+            Pa_Terminate();   // 清理 PortAudio
+            return false;
+        }
+
+        // 4. 验证设备状态
+        if (!device_->isDeviceOpen()) {
+            std::cerr << "Device is not open after initialization" << std::endl;
+            device_.reset();  // 清理设备资源
+            Pa_Terminate();   // 清理 PortAudio
+            return false;
+        }
+
+        // 5. 设置设备回调函数
+        device_->setCallback([this](const void* input, void* output, size_t frameCount) {
+            this->audioCallback(input, output, frameCount);
+        });
+
+        // 6. 初始化音频处理器
         processor_ = std::make_unique<AudioProcessor>();
         if (!processor_->initialize(config)) {
             std::cerr << "Failed to initialize audio processor" << std::endl;
-            Pa_Terminate();
+            device_.reset();      // 清理设备资源
+            processor_.reset();   // 清理处理器资源
+            Pa_Terminate();       // 清理 PortAudio
             return false;
         }
 
-        thread_ = std::make_unique<AudioThread>();
-        if (!thread_->initialize(processor_.get())) {
+        // 7. 配置编码格式和参数
+        processor_->setEncodingFormat(config.encodingFormat);
+        if (config.encodingFormat == EncodingFormat::OPUS) {
+            // 计算 Opus 帧大小（采样点数）
+            int samplesPerFrame = (config.opusFrameLength * static_cast<int>(config.sampleRate)) / 1000;
+            std::cout << "[DEBUG] Opus frame size: " << samplesPerFrame << " samples" << std::endl;
+            std::cout << "- opusFrameLength:" << config.opusFrameLength << std::endl;
+            std::cout << "- sampleRate:" << static_cast<int>(config.sampleRate) << std::endl;
+            
+            // 检查缓冲区大小是否是帧大小的整数倍
+            if (samplesPerFrame % config.framesPerBuffer != 0) {
+                std::cerr << "Warning: Opus frame size (" << samplesPerFrame 
+                         << ") is not a multiple of buffer size (" << config.framesPerBuffer << ")" << std::endl;
+            } else {
+                std::cout << "[DEBUG] Buffer size (" << config.framesPerBuffer 
+                         << ") is compatible with Opus frame size (" << samplesPerFrame << ")" << std::endl;
+            }
+            
+            processor_->setOpusFrameLength(config.opusFrameLength);
+        }
+
+        // 8. 确保VAD配置正确传递
+        if (config.enableVAD) {
+            VADConfig vadConfig;
+            vadConfig.enabled = true;
+            vadConfig.threshold = 0.5f;  // 默认阈值
+            vadConfig.enableIdleDetection = true;
+            vadConfig.enableSentenceDetection = true;
+            vadConfig.silenceTimeoutMs = 1000;  // 1秒无声音进入空闲状态
+            vadConfig.sentenceTimeoutMs = 500;  // 0.5秒无声音判定句子结束
+            processor_->updateVADConfig(vadConfig);
+            std::cout << "[DEBUG] VAD configuration updated" << std::endl;
+        }
+
+        // 9. 初始化音频线程
+        audioStreamThread_ = std::make_shared<AudioThread>();
+        if (!audioStreamThread_->initialize(processor_.get())) {
             std::cerr << "Failed to initialize audio thread" << std::endl;
-            Pa_Terminate();
+            device_.reset();          // 清理设备资源
+            processor_.reset();       // 清理处理器资源
+            audioStreamThread_.reset(); // 清理线程资源
+            Pa_Terminate();           // 清理 PortAudio
             return false;
         }
 
+        // 10. 标记初始化完成
         initialized_ = true;
+        std::cout << "[DEBUG] Exiting AudioManager::initialize, result: success" << std::endl;
         return true;
-    }
-
-    /**
-     * @brief 从配置文件加载配置
-     * @param configPath 配置文件路径
-     * @return 加载是否成功
-     */
-    bool loadConfig(const std::string& configPath) {
-        try {
-            std::ifstream file(configPath);
-            if (!file.is_open()) {
-                return false;
-            }
-
-            nlohmann::json j;
-            file >> j;
-
-            AudioConfig config;
-            config.sampleRate = static_cast<SampleRate>(j["sampleRate"].get<int>());
-            config.channels = static_cast<ChannelCount>(j["channels"].get<int>());
-            config.format = static_cast<SampleFormat>(j["format"].get<int>());
-            config.framesPerBuffer = j["framesPerBuffer"].get<int>();
-            config.encodingFormat = static_cast<EncodingFormat>(j["encodingFormat"].get<int>());
-            config.opusFrameLength = j["opusFrameLength"].get<int>();
-
-            return updateConfig(config);
-        } catch (const std::exception&) {
-            return false;
-        }
-    }
-
-    /**
-     * @brief 保存配置到文件
-     * @param configPath 配置文件路径
-     * @return 保存是否成功
-     */
-    bool saveConfig(const std::string& configPath) {
-        try {
-            nlohmann::json j;
-            j["sampleRate"] = static_cast<int>(config_.sampleRate);
-            j["channels"] = static_cast<int>(config_.channels);
-            j["format"] = static_cast<int>(config_.format);
-            j["framesPerBuffer"] = config_.framesPerBuffer;
-            j["encodingFormat"] = static_cast<int>(config_.encodingFormat);
-            j["opusFrameLength"] = config_.opusFrameLength;
-
-            std::ofstream file(configPath);
-            if (!file.is_open()) {
-                return false;
-            }
-
-            file << j.dump(4);
-            return true;
-        } catch (const std::exception&) {
-            return false;
-        }
     }
 
     /**
@@ -207,136 +231,13 @@ public:
     }
 
     /**
-     * @brief 更新音频配置
-     * @param config 新的音频配置
-     * @return 更新是否成功
-     */
-    bool updateConfig(const AudioConfig& config) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        
-        try {
-            // 验证配置
-            if (!validateConfig(config)) {
-                lastError_ = "Invalid audio configuration";
-                return false;
-            }
-            
-            // 如果设备已经打开，先关闭
-            if (device_ && device_->isDeviceOpen()) {
-                device_->closeDevice();
-            }
-            
-            // 创建新的音频设备
-            device_ = std::make_unique<AudioDevice>();
-            if (!device_->initialize()) {
-                lastError_ = "Failed to initialize audio device: " + device_->getLastError();
-                return false;
-            }
-            
-            // 获取当前设备信息
-            auto devices = device_->getAvailableDevices();
-            if (devices.empty()) {
-                lastError_ = "No audio devices available";
-                return false;
-            }
-            
-            // 使用配置中指定的设备
-            DeviceInfo selectedDevice;
-            bool found = false;
-            
-            // 如果配置中指定了设备名称，则使用该设备
-            if (!config.inputDevice.name.empty()) {
-                for (const auto& device : devices) {
-                    if (device.name == config.inputDevice.name) {
-                        selectedDevice = device;
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            
-            // 如果没有找到指定设备或没有指定设备，使用默认设备
-            if (!found) {
-                // 查找 MacBook Pro 麦克风
-                for (const auto& device : devices) {
-                    if (device.name.find("MacBook Pro") != std::string::npos) {
-                        selectedDevice = device;
-                        found = true;
-                        break;
-                    }
-                }
-                
-                // 如果还是没找到，使用第一个设备
-                if (!found) {
-                    selectedDevice = devices[0];
-                }
-            }
-            
-            // 打开设备
-            std::cout << "[DEBUG] Opening device: " << selectedDevice.name << std::endl;
-            std::cout << "[DEBUG] Configuration:" << std::endl;
-            std::cout << "  - Sample Rate: " << static_cast<int>(config.sampleRate) << "Hz" << std::endl;
-            std::cout << "  - Channels: " << static_cast<int>(config.channels) << std::endl;
-            std::cout << "  - Format: " << static_cast<int>(config.format) << std::endl;
-            std::cout << "  - Frames per buffer: " << config.framesPerBuffer << std::endl;
-            
-            if (!device_->openInputDevice(selectedDevice, config)) {
-                lastError_ = "Failed to open input device: " + device_->getLastError();
-                return false;
-            }
-            
-            currentConfig_ = config;
-            return true;
-        } catch (const std::exception& e) {
-            lastError_ = std::string("Exception in updateConfig: ") + e.what();
-            return false;
-        }
-    }
-
-    bool validateConfig(const AudioConfig& config) {
-        // 验证采样率
-        if (static_cast<int>(config.sampleRate) <= 0) {
-            lastError_ = "Invalid sample rate: " + std::to_string(static_cast<int>(config.sampleRate));
-            return false;
-        }
-        
-        // 验证通道数
-        if (config.channels != ChannelCount::MONO && config.channels != ChannelCount::STEREO) {
-            lastError_ = "Invalid channel count: " + std::to_string(static_cast<int>(config.channels));
-            return false;
-        }
-        
-        // 验证缓冲区大小
-        if (config.framesPerBuffer <= 0) {
-            lastError_ = "Invalid frames per buffer: " + std::to_string(config.framesPerBuffer);
-            return false;
-        }
-        
-        // 验证采样格式
-        if (config.format != SampleFormat::FLOAT32 && config.format != SampleFormat::INT16) {
-            lastError_ = "Invalid sample format";
-            return false;
-        }
-        
-        return true;
-    }
-
-    /**
-     * @brief 获取当前音频配置
-     * @return 当前音频配置
-     */
-    const AudioConfig& getConfig() const {
-        return config_;
-    }
-
-    /**
      * @brief 清理资源
      */
     void cleanup() {
         if (isRecording_) {
             stopRecording();
         }
-        thread_.reset();
+        audioStreamThread_.reset();
         processor_.reset();
         if (initialized_) {
             Pa_Terminate();
@@ -367,8 +268,15 @@ public:
                 std::filesystem::create_directories(parentPath);
             }
 
-            // 计算数据大小
+            // 计算数据大小 - 录音缓冲区始终使用INT16格式
             size_t dataSize = frames * sizeof(int16_t) * static_cast<int>(config_.channels);
+            
+            std::cout << "[DEBUG] WAV File Write Parameters:" << std::endl;
+            std::cout << "  - Input frames: " << frames << std::endl;
+            std::cout << "  - Channels: " << static_cast<int>(config_.channels) << std::endl;
+            std::cout << "  - Bytes per sample: " << sizeof(int16_t) << std::endl;
+            std::cout << "  - Calculated data size: " << dataSize << " bytes" << std::endl;
+            std::cout << "  - Expected duration: " << (float)frames / static_cast<int>(config_.sampleRate) << " seconds" << std::endl;
 
             // 生成文件头
             WavHeader header = generateWavHeader(dataSize);
@@ -394,11 +302,31 @@ public:
                     lastError_ = "Failed to open file for writing data: " + filename;
                     return false;
                 }
+                
+                // 调试：检查要写入的前几个字节
+                if (frames > 0) {
+                    const uint8_t* rawBytes = static_cast<const uint8_t*>(input);
+                    std::cout << "[DEBUG] Writing first 8 bytes to WAV: ";
+                    for (size_t i = 0; i < 8 && i < dataSize; ++i) {
+                        printf("%02X ", rawBytes[i]);
+                    }
+                    std::cout << std::endl;
+                    
+                    const int16_t* int16Data = static_cast<const int16_t*>(input);
+                    std::cout << "[DEBUG] First few samples: ";
+                    for (size_t i = 0; i < std::min(static_cast<size_t>(4), frames); ++i) {
+                        std::cout << int16Data[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+                
                 file.write(static_cast<const char*>(input), dataSize);
                 if (!file.good()) {
                     lastError_ = "Failed to write audio data";
                     return false;
                 }
+                
+                std::cout << "[DEBUG] Successfully wrote " << dataSize << " bytes of audio data" << std::endl;
             }
 
             return true;
@@ -663,136 +591,208 @@ public:
     bool startRecording(const std::string& outputFile) {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        try {
-            // 检查当前状态
-            if (isRecording_) {
-                lastError_ = "Recording is already in progress";
-                return false;
-            }
-
-            if (!device_ || !device_->isDeviceOpen()) {
-                lastError_ = "No audio device available";
-                return false;
-            }
-
-            // 检查输出文件路径
-            std::filesystem::path filePath(outputFile);
-            std::filesystem::path parentPath = filePath.parent_path();
-            if (!parentPath.empty() && !std::filesystem::exists(parentPath)) {
-                try {
-                    std::filesystem::create_directories(parentPath);
-                } catch (const std::exception& e) {
-                    lastError_ = std::string("Failed to create output directory: ") + e.what();
-                    return false;
-                }
-            }
-
-            // 检查文件扩展名并设置相应的编码格式
-            std::string extension = filePath.extension().string();
-            if (extension == ".ogg") {
-                std::cout << "[DEBUG] Setting encoding format to OPUS" << std::endl;
-                processor_->setEncodingFormat(EncodingFormat::OPUS);
-            } else if (extension == ".wav") {
-                std::cout << "[DEBUG] Setting encoding format to WAV" << std::endl;
-                processor_->setEncodingFormat(EncodingFormat::WAV);
-            } else {
-                lastError_ = "Unsupported file format: " + extension;
-                return false;
-            }
-
-            // 清空录音缓冲区
-            recordingBuffer_.clear();
-            
-            // 设置音频回调
-            device_->setCallback([this](const void* input, void* output, size_t frameCount) {
-                this->audioCallback(input, output, frameCount);
-            });
-            
-            // 开始录音
-            std::cout << "[DEBUG] Starting audio stream..." << std::endl;
-            if (!device_->startStream()) {
-                lastError_ = "Failed to start audio stream: " + device_->getLastError();
-                return false;
-            }
-            
-            // 设置输出文件
-            currentOutputFile_ = outputFile;
-            isRecording_ = true;
-            
-            std::cout << "[DEBUG] Recording to file: " << currentOutputFile_ << std::endl;
-            return true;
-        } catch (const std::exception& e) {
-            lastError_ = std::string("Exception in startRecording: ") + e.what();
+        if (isRecording_) {
+            AUDIO_LOG("Already recording");
             return false;
         }
+        
+        if (!device_ || !device_->isDeviceOpen()) {
+            AUDIO_LOG("No audio device available");
+            return false;
+        }
+
+        // 检查输出文件路径
+        std::filesystem::path filePath(outputFile);
+        std::filesystem::path parentPath = filePath.parent_path();
+        if (!parentPath.empty() && !std::filesystem::exists(parentPath)) {
+            try {
+                std::filesystem::create_directories(parentPath);
+            } catch (const std::exception& e) {
+                lastError_ = std::string("Failed to create output directory: ") + e.what();
+                std::cerr << "[ERROR] " << lastError_ << std::endl;
+                return false;
+            }
+        }
+
+        // 检查文件扩展名并设置相应的编码格式
+        std::string extension = filePath.extension().string();
+        if (extension == ".ogg") {
+            AUDIO_LOG("Setting encoding format to OPUS");
+            processor_->setEncodingFormat(EncodingFormat::OPUS);
+        } else if (extension == ".wav") {
+            AUDIO_LOG("Setting encoding format to WAV");
+            processor_->setEncodingFormat(EncodingFormat::WAV);
+        } else {
+            lastError_ = "Unsupported file format: " + extension;
+            std::cerr << "[ERROR] " << lastError_ << std::endl;
+            return false;
+        }
+
+        // 验证 Opus 编码参数
+        if (extension == ".ogg" && (config_.opusBitrate <= 0 || 
+                                    config_.opusFrameLength <= 0 || 
+                                    config_.opusComplexity < 0 || 
+                                    config_.opusComplexity > 10)) {
+            lastError_ = "Invalid Opus encoding parameters";
+            return false;
+        }
+
+        // 清空录音缓冲区
+        recordingBuffer_.clear();
+        
+        // 开始录音
+        AUDIO_LOG("Starting audio stream...");
+        
+        // 创建并初始化音频线程
+        audioStreamThread_ = std::make_shared<AudioThread>();
+        if (!audioStreamThread_->initialize(processor_.get())) {
+            lastError_ = "Failed to initialize audio thread";
+            std::cerr << "[ERROR] " << lastError_ << std::endl;
+            return false;
+        }
+
+        // 设置音频处理器，确保 AudioThread 使用相同的处理器实例
+        audioStreamThread_->setProcessor(processor_);
+        std::cout << "[DEBUG] AudioManager set processor to AudioThread: " << static_cast<void*>(processor_.get()) << std::endl;
+
+        // 设置输入设备
+        if (!audioStreamThread_->setInputDevice(device_->getCurrentDevice())) {
+            lastError_ = "Failed to set input device";
+            std::cerr << "[ERROR] " << lastError_ << std::endl;
+            return false;
+        }
+
+        // 设置音频回调
+        audioStreamThread_->setInputCallback([this](const void* input, void* output, size_t frameCount) {
+            this->audioCallback(input, output, frameCount);
+        });
+
+        // 启动音频流
+        audioStreamThread_->start();
+
+        // 统一启动延迟：让音频流稳定后再开始录音
+        std::cout << "[DEBUG] Waiting for audio stream to stabilize..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));  // 200ms延迟
+        std::cout << "[DEBUG] Audio stream stabilization complete" << std::endl;
+
+        // 开始录音
+        if (!audioStreamThread_->startRecording()) {
+            lastError_ = "Failed to start recording";
+            std::cerr << "[ERROR] " << lastError_ << std::endl;
+            std::cerr << "[DEBUG] audioStreamThread_->isRunning(): " << audioStreamThread_->isRunning() << std::endl;
+            return false;
+        }
+
+        // 设置输出文件
+        currentOutputFile_ = outputFile;
+        isRecording_ = true;
+        
+        AUDIO_LOG("Starting recording to file: " + outputFile);
+        return true;
     }
 
     bool stopRecording() {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        try {
-            if (!isRecording_) {
-                lastError_ = "No recording in progress";
-                return false;
-            }
-
-            if (!device_ || !device_->isDeviceOpen()) {
-                lastError_ = "No audio device available";
-                return false;
-            }
-            
-            // 停止录音
-            std::cout << "[DEBUG] Stopping audio stream..." << std::endl;
-            if (!device_->stopStream()) {
-                lastError_ = "Failed to stop audio stream: " + device_->getLastError();
-                return false;
-            }
-            
-            isRecording_ = false;
-            
-            // 保存录音数据
-            if (!recordingBuffer_.empty()) {
-                std::cout << "[DEBUG] Saving recording data to file: " << currentOutputFile_ << std::endl;
-                
-                // 根据文件扩展名选择保存格式
-                std::filesystem::path filePath(currentOutputFile_);
-                std::string extension = filePath.extension().string();
-                
-                bool saveSuccess = false;
-                if (extension == ".wav") {
-                    saveSuccess = writeWavFile(recordingBuffer_.data(), 
-                                            recordingBuffer_.size() / static_cast<int>(config_.channels), 
-                                            currentOutputFile_);
-                } else if (extension == ".ogg") {
-                    saveSuccess = writeOpusFile(recordingBuffer_.data(), 
-                                              recordingBuffer_.size() / static_cast<int>(config_.channels), 
-                                              currentOutputFile_);
-                } else {
-                    lastError_ = "Unsupported file format: " + extension;
-                    return false;
-                }
-
-                if (!saveSuccess) {
-                    lastError_ = "Failed to save recording data: " + lastError_;
-                    return false;
-                }
-                
-                recordingBuffer_.clear();
-            }
-            
-            std::cout << "[DEBUG] Recording stopped, file saved: " << currentOutputFile_ << std::endl;
-            return true;
-        } catch (const std::exception& e) {
-            lastError_ = std::string("Exception in stopRecording: ") + e.what();
+        if (!isRecording_) {
+            AUDIO_LOG("Not recording");
             return false;
         }
+        
+        if (!device_ || !device_->isDeviceOpen()) {
+            AUDIO_LOG("No audio device available");
+            return false;
+        }
+        
+        // 停止录音
+        AUDIO_LOG("Stopping audio stream...");
+        if (audioStreamThread_) {
+            audioStreamThread_->stop();
+        }
+        
+        isRecording_ = false;
+        
+        // 保存录音数据
+        if (!recordingBuffer_.empty()) {
+            AUDIO_LOG("Saving recording data to file: " + currentOutputFile_);
+            
+            // 调试：检查录音缓冲区的内容
+            std::cout << "[DEBUG] Recording buffer analysis:" << std::endl;
+            std::cout << "  - Buffer size: " << recordingBuffer_.size() << " samples" << std::endl;
+            std::cout << "  - Channels: " << static_cast<int>(config_.channels) << std::endl;
+            std::cout << "  - Frame count: " << recordingBuffer_.size() / static_cast<int>(config_.channels) << std::endl;
+            
+            // 检查前几个样本
+            std::cout << "  - First 8 samples: ";
+            for (size_t i = 0; i < std::min(static_cast<size_t>(8), recordingBuffer_.size()); ++i) {
+                std::cout << recordingBuffer_[i] << " ";
+            }
+            std::cout << std::endl;
+            
+            // 统计非零样本
+            size_t nonZeroSamples = 0;
+            int16_t maxSample = 0, minSample = 0;
+            for (size_t i = 0; i < recordingBuffer_.size(); ++i) {
+                if (recordingBuffer_[i] != 0) {
+                    nonZeroSamples++;
+                    maxSample = std::max(maxSample, recordingBuffer_[i]);
+                    minSample = std::min(minSample, recordingBuffer_[i]);
+                }
+            }
+            std::cout << "  - Non-zero samples: " << nonZeroSamples << " / " << recordingBuffer_.size() << std::endl;
+            std::cout << "  - Sample range: " << minSample << " to " << maxSample << std::endl;
+            
+            // 根据文件扩展名选择保存格式
+            std::filesystem::path filePath(currentOutputFile_);
+            std::string extension = filePath.extension().string();
+            
+            bool saveSuccess = false;
+            if (extension == ".wav") {
+                saveSuccess = writeWavFile(recordingBuffer_.data(), 
+                                        recordingBuffer_.size() / static_cast<int>(config_.channels), 
+                                        currentOutputFile_);
+            } else if (extension == ".ogg") {
+                saveSuccess = writeOpusFile(recordingBuffer_.data(), 
+                                          recordingBuffer_.size() / static_cast<int>(config_.channels), 
+                                          currentOutputFile_);
+            } else {
+                lastError_ = "Unsupported file format: " + extension;
+                return false;
+            }
+
+            if (!saveSuccess) {
+                lastError_ = "Failed to save recording data: " + lastError_;
+                std::cerr << "[ERROR] " << lastError_ << std::endl;
+                return false;
+            }
+            
+            // 验证文件是否成功创建
+            if (!std::filesystem::exists(currentOutputFile_)) {
+                lastError_ = "Output file was not created: " + currentOutputFile_;
+                std::cerr << "[ERROR] " << lastError_ << std::endl;
+                return false;
+            }
+            
+            AUDIO_LOG("Recording stopped, file saved: " + currentOutputFile_);
+            // AUDIO_LOG_VAR(std::filesystem::file_size(currentOutputFile_)); // 移除未声明变量
+            
+            recordingBuffer_.clear();
+        } else {
+            AUDIO_LOG("Recording buffer is empty, no data to save");
+        }
+        
+        return true;
+    }
+
+    const VADStatus& getVADStatus() const {
+        return processor_->getVADStatus();
     }
 
 private:
     bool initialized_;
     bool isRecording_;
     std::shared_ptr<AudioProcessor> processor_;
-    std::unique_ptr<AudioThread> thread_;
+    std::shared_ptr<AudioThread> audioStreamThread_;
     std::string currentOutputFile_;
     std::vector<int16_t> recordingBuffer_;
     std::unique_ptr<AudioDevice> device_;
@@ -830,8 +830,8 @@ private:
             file.seekp(sizeof(WavHeader), std::ios::beg);
         }
 
-        // 写入音频数据
-        file.write(static_cast<const char*>(data), frames * sizeof(float) * static_cast<int>(config_.channels));
+        // 写入音频数据（INT16格式）
+        file.write(static_cast<const char*>(data), frames * sizeof(int16_t) * static_cast<int>(config_.channels));
         return file.good();
     }
 
@@ -845,21 +845,28 @@ private:
         header.format = 1;  // PCM
         header.channels = static_cast<int>(config_.channels);
         header.sampleRate = static_cast<int>(config_.sampleRate);
-        header.bitsPerSample = 16;  // 使用16位整数
+        
+        // 注意：无论输入格式是什么，录音缓冲区始终存储为INT16格式
+        // 在audioCallback中，FLOAT32数据会被转换为INT16并存储到recordingBuffer_
+        // 因此WAV文件头应该始终使用16位配置
+        header.bitsPerSample = 16;  // 录音缓冲区使用INT16格式
         header.byteRate = header.sampleRate * header.channels * sizeof(int16_t);
         header.blockAlign = header.channels * sizeof(int16_t);
+        
         memcpy(header.data, "data", 4);
         header.dataSize = dataSize;
 
         // 打印文件头信息用于调试
-        std::cout << "[DEBUG] WAV Header:" << std::endl;
+        std::cout << "[DEBUG] WAV Header Generated:" << std::endl;
         std::cout << "  - Format: " << header.format << " (1 = PCM)" << std::endl;
         std::cout << "  - Channels: " << header.channels << std::endl;
         std::cout << "  - Sample Rate: " << header.sampleRate << " Hz" << std::endl;
-        std::cout << "  - Bits Per Sample: " << header.bitsPerSample << " bits" << std::endl;
+        std::cout << "  - Bits Per Sample: " << header.bitsPerSample << " bits (buffer format)" << std::endl;
         std::cout << "  - Byte Rate: " << header.byteRate << " bytes/sec" << std::endl;
         std::cout << "  - Block Align: " << header.blockAlign << " bytes" << std::endl;
         std::cout << "  - Data Size: " << header.dataSize << " bytes" << std::endl;
+        std::cout << "  - Expected duration: " << (float)dataSize / header.byteRate << " seconds" << std::endl;
+        std::cout << "  - Input device format: " << static_cast<int>(config_.format) << " (INT16=0, FLOAT32=3)" << std::endl;
 
         return header;
     }
@@ -1001,16 +1008,204 @@ private:
 
     void audioCallback(const void* input, void* output, size_t frameCount) {
         if (!initialized_) {
+            std::cerr << "[ERROR] Audio callback called before initialization" << std::endl;
             return;
         }
 
         if (isRecording_) {
-            const int16_t* inputData = static_cast<const int16_t*>(input);
-            size_t samples = frameCount * static_cast<int>(config_.channels);
-            recordingBuffer_.insert(recordingBuffer_.end(), inputData, inputData + samples);
+            // VAD处理已关闭，跳过VAD相关逻辑
+            
+            // 将数据添加到录音缓冲区
+            size_t samplesPerFrame = static_cast<int>(config_.channels);
+            size_t totalSamples = frameCount * samplesPerFrame;
+            
+            // 简化调试输出，每100帧输出一次状态
+            static int frameCounter = 0;
+            frameCounter++;
+            if (frameCounter % 100 == 0) {
+                std::cout << "[DEBUG] Recording: frame " << frameCounter 
+                         << ", config_format=" << static_cast<int>(config_.format)
+                         << ", samples=" << totalSamples << std::endl;
+                
+                // 检查实际数据内容
+                if (frameCount > 0 && input) {
+                    const uint8_t* rawBytes = static_cast<const uint8_t*>(input);
+                    std::cout << "[DEBUG] Raw data check: ";
+                    for (size_t i = 0; i < 8 && i < frameCount * 4; ++i) {
+                        printf("%02X ", rawBytes[i]);
+                    }
+                    std::cout << std::endl;
+                    
+                    // 尝试按两种格式解释数据
+                    const int16_t* asInt16 = static_cast<const int16_t*>(input);
+                    const float* asFloat32 = static_cast<const float*>(input);
+                    std::cout << "[DEBUG] As INT16: " << asInt16[0] << " " << asInt16[1] << std::endl;
+                    std::cout << "[DEBUG] As FLOAT32: " << asFloat32[0] << " " << asFloat32[1] << std::endl;
+                }
+            }
+            
+            // 根据设备的实际输出格式处理数据
+            // 从调试信息看：设备报告Sample format: 1 (paInt16)，但可能实际输出FLOAT32
+            // 我们需要根据设备信息和数据特征来正确判断
+            
+            // 检查数据是否为空
+            if (!input) {
+                std::cerr << "[ERROR] Input buffer is null!" << std::endl;
+                return;
+            }
+            
+            // 获取设备的实际格式信息
+            bool deviceReportsFloat32 = false;
+            if (device_ && device_->isDeviceOpen()) {
+                AudioConfig deviceConfig = device_->getCurrentConfig();
+                deviceReportsFloat32 = (deviceConfig.format == SampleFormat::FLOAT32);
+                
+                if (frameCounter % 100 == 0) {
+                    std::cout << "[DEBUG] Device config format: " << static_cast<int>(deviceConfig.format) 
+                             << " (INT16=0, FLOAT32=3)" << std::endl;
+                }
+            }
+            
+            // 改进的格式检测逻辑
+            bool treatAsFloat32 = false;
+            if (frameCount > 0) {
+                const float* floatData = static_cast<const float*>(input);
+                const int16_t* int16Data = static_cast<const int16_t*>(input);
+                
+                // 检查FLOAT32数据的有效性和合理性
+                bool validFloatRange = true;
+                bool hasReasonableFloatValues = false;
+                float maxAbs = 0.0f;
+                
+                for (size_t i = 0; i < std::min(frameCount, static_cast<size_t>(10)); ++i) {
+                    float sample = floatData[i];
+                    if (!std::isfinite(sample) || sample < -100.0f || sample > 100.0f) {
+                        validFloatRange = false;
+                        break;
+                    }
+                    maxAbs = std::max(maxAbs, std::abs(sample));
+                    // 如果浮点值在合理的音频范围内（通常-1到1，但允许稍大）
+                    if (std::abs(sample) > 0.001f && std::abs(sample) < 10.0f) {
+                        hasReasonableFloatValues = true;
+                    }
+                }
+                
+                // 检查INT16数据的特征
+                bool hasLargeInt16Values = false;
+                for (size_t i = 0; i < std::min(frameCount, static_cast<size_t>(10)); ++i) {
+                    int16_t sample = int16Data[i];
+                    if (std::abs(sample) > 1000) {  // 较大的INT16值
+                        hasLargeInt16Values = true;
+                    }
+                }
+                
+                // 决策逻辑：优先考虑FLOAT32，特别是当：
+                // 1. 设备报告FLOAT32格式，或
+                // 2. 浮点数据在合理范围内且有意义的值，或  
+                // 3. INT16解释产生的值看起来不像音频数据
+                if (deviceReportsFloat32 || 
+                    (validFloatRange && hasReasonableFloatValues && maxAbs < 5.0f) ||
+                    (!hasLargeInt16Values && hasReasonableFloatValues)) {
+                    treatAsFloat32 = true;
+                }
+                
+                if (frameCounter % 100 == 0) {
+                    std::cout << "[DEBUG] Format analysis:" << std::endl;
+                    std::cout << "  - deviceReportsFloat32: " << deviceReportsFloat32 << std::endl;
+                    std::cout << "  - validFloatRange: " << validFloatRange << std::endl;
+                    std::cout << "  - hasReasonableFloatValues: " << hasReasonableFloatValues << std::endl;
+                    std::cout << "  - maxAbs: " << maxAbs << std::endl;
+                    std::cout << "  - hasLargeInt16Values: " << hasLargeInt16Values << std::endl;
+                    std::cout << "  - DECISION: treatAsFloat32 = " << treatAsFloat32 << std::endl;
+                }
+            }
+            
+            if (treatAsFloat32) {
+                // 按FLOAT32处理
+                const float* floatData = static_cast<const float*>(input);
+                
+                // 添加详细的转换调试信息
+                size_t bufferSizeBefore = recordingBuffer_.size();
+                
+                // 分析音频数据的实际范围，而不是强制限制到-1.0~1.0
+                float minSample = 0.0f, maxSample = 0.0f;
+                for (size_t i = 0; i < totalSamples; ++i) {
+                    float sample = floatData[i];
+                    minSample = std::min(minSample, sample);
+                    maxSample = std::max(maxSample, sample);
+                }
+                
+                // 计算合适的缩放因子，避免削波
+                float maxAbs = std::max(std::abs(minSample), std::abs(maxSample));
+                float scaleFactor = 1.0f;
+                if (maxAbs > 1.0f) {
+                    scaleFactor = 1.0f / maxAbs;  // 缩放以防止削波
+                }
+                
+                for (size_t i = 0; i < totalSamples; ++i) {
+                    // 使用动态缩放而不是硬限制
+                    float sample = floatData[i] * scaleFactor;
+                    int16_t int16Sample = static_cast<int16_t>(sample * 32767);
+                    recordingBuffer_.push_back(int16Sample);
+                }
+                
+                if (frameCounter % 100 == 0) {
+                    std::cout << "[DEBUG] FLOAT32 conversion details:" << std::endl;
+                    std::cout << "  - Buffer size before: " << bufferSizeBefore << std::endl;
+                    std::cout << "  - Buffer size after: " << recordingBuffer_.size() << std::endl;
+                    std::cout << "  - Added samples: " << totalSamples << std::endl;
+                    std::cout << "  - Input range: " << minSample << " to " << maxSample << std::endl;
+                    std::cout << "  - Max absolute: " << maxAbs << std::endl;
+                    std::cout << "  - Scale factor: " << scaleFactor << std::endl;
+                    
+                    // 显示前几个转换结果
+                    if (totalSamples > 0) {
+                        size_t startIndex = bufferSizeBefore;
+                        std::cout << "  - First few conversions:" << std::endl;
+                        for (size_t i = 0; i < std::min(totalSamples, static_cast<size_t>(4)); ++i) {
+                            float originalFloat = floatData[i];
+                            float scaledFloat = originalFloat * scaleFactor;
+                            int16_t convertedInt16 = static_cast<int16_t>(scaledFloat * 32767);
+                            std::cout << "    " << i << ": " << originalFloat << " -> " 
+                                     << scaledFloat << " -> " << convertedInt16;
+                            if (startIndex + i < recordingBuffer_.size()) {
+                                std::cout << " (stored: " << recordingBuffer_[startIndex + i] << ")";
+                            }
+                            std::cout << std::endl;
+                        }
+                    }
+                    
+                    std::cout << "[DEBUG] Processed as FLOAT32 data" << std::endl;
+                }
+            } else {
+                // 按INT16处理
+                const int16_t* inputData = static_cast<const int16_t*>(input);
+                recordingBuffer_.insert(recordingBuffer_.end(), inputData, inputData + totalSamples);
+                if (frameCounter % 100 == 0) {
+                    std::cout << "[DEBUG] Processed as INT16 data" << std::endl;
+                }
+            }
         }
 
-        processor_->processAudio(input, output, frameCount);
+        // 处理输出（如果需要）
+        if (output) {
+            // 这里可以添加输出处理逻辑
+        }
+    }
+
+    std::string getVADStateString(VADState state) {
+        switch (state) {
+            case VADState::IDLE:
+                return "IDLE";
+            case VADState::SILENCE:
+                return "SILENCE";
+            case VADState::SPEAKING:
+                return "SPEAKING";
+            case VADState::SENTENCE_END:
+                return "SENTENCE_END";
+            default:
+                return "UNKNOWN";
+        }
     }
 };
 
@@ -1020,13 +1215,9 @@ AudioManager::~AudioManager() = default;
 
 // AudioManager公共接口实现
 bool AudioManager::initialize(const AudioConfig& config) { return impl_->initialize(config); }
-bool AudioManager::loadConfig(const std::string& configPath) { return impl_->loadConfig(configPath); }
-bool AudioManager::saveConfig(const std::string& configPath) { return impl_->saveConfig(configPath); }
 std::vector<DeviceInfo> AudioManager::getAvailableDevices() { return impl_->getAvailableDevices(); }
 std::shared_ptr<AudioThread> AudioManager::createAudioThread(const AudioConfig& config) { return impl_->createAudioThread(config); }
 std::shared_ptr<AudioProcessor> AudioManager::getProcessor() { return impl_->getProcessor(); }
-bool AudioManager::updateConfig(const AudioConfig& config) { return impl_->updateConfig(config); }
-const AudioConfig& AudioManager::getConfig() const { return impl_->getConfig(); }
 void AudioManager::cleanup() { impl_->cleanup(); }
 
 // 文件操作函数实现
@@ -1052,6 +1243,264 @@ bool AudioManager::startRecording(const std::string& outputFile) {
 
 bool AudioManager::stopRecording() {
     return impl_->stopRecording();
+}
+
+const VADStatus& AudioManager::getVADStatus() const {
+    return impl_->getVADStatus();
+}
+
+bool AudioManager::loadAudioConfig(AudioConfig& inputConfig, OutputSettings& outputSettings, const std::string& configPath) {
+    try {
+        if (!std::filesystem::exists(configPath)) {
+            std::cout << "Config file not found: " << configPath << std::endl;
+            return false;
+        }
+        
+        std::ifstream file(configPath);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open config file: " << configPath << std::endl;
+            return false;
+        }
+        
+        nlohmann::json config;
+        file >> config;
+        file.close();
+        
+        // 加载基础音频参数
+        if (config.contains("audio")) {
+            auto& audio = config["audio"];
+            inputConfig.sampleRate = static_cast<SampleRate>(audio["sampleRate"]);
+            inputConfig.channels = static_cast<ChannelCount>(audio["channels"]);
+            
+            // 处理音频格式字符串
+            std::string formatStr = audio["format"];
+            if (formatStr == "FLOAT32") {
+                inputConfig.format = SampleFormat::FLOAT32;
+            } else if (formatStr == "INT16") {
+                inputConfig.format = SampleFormat::INT16;
+            } else if (formatStr == "INT24") {
+                inputConfig.format = SampleFormat::INT24;
+            } else {
+                inputConfig.format = SampleFormat::INT16; // 默认使用INT16
+            }
+            
+            inputConfig.framesPerBuffer = audio["framesPerBuffer"];
+        }
+        
+        // 加载设备信息
+        if (config.contains("device")) {
+            auto& device = config["device"];
+            inputConfig.inputDevice.name = device["name"];
+            inputConfig.inputDevice.index = device["index"];
+            
+            // 处理设备类型字符串
+            std::string typeStr = device["type"];
+            if (typeStr == "INPUT") {
+                inputConfig.inputDevice.type = DeviceType::INPUT;
+            } else if (typeStr == "OUTPUT") {
+                inputConfig.inputDevice.type = DeviceType::OUTPUT;
+            } else if (typeStr == "BOTH") {
+                inputConfig.inputDevice.type = DeviceType::BOTH;
+            } else {
+                inputConfig.inputDevice.type = DeviceType::INPUT; // 默认值
+            }
+            
+            inputConfig.inputDevice.maxInputChannels = device["maxInputChannels"];
+            inputConfig.inputDevice.maxOutputChannels = device["maxOutputChannels"];
+            inputConfig.inputDevice.defaultSampleRate = device["defaultSampleRate"];
+            inputConfig.inputDevice.defaultLatency = device["defaultLatency"];
+        }
+        
+        // 加载编码参数
+        if (config.contains("encoding")) {
+            auto& encoding = config["encoding"];
+            
+            // 处理编码格式字符串
+            std::string formatStr = encoding["format"];
+            if (formatStr == "WAV") {
+                outputSettings.format = EncodingFormat::WAV;
+            } else if (formatStr == "OPUS") {
+                outputSettings.format = EncodingFormat::OPUS;
+            } else {
+                outputSettings.format = EncodingFormat::WAV; // 默认值
+            }
+            
+            outputSettings.opusFrameLength = encoding["opusFrameLength"];
+            outputSettings.opusBitrate = encoding["opusBitrate"];
+            outputSettings.opusComplexity = encoding["opusComplexity"];
+            
+            // 处理OPUS应用类型字符串
+            std::string appStr = encoding["opusApplication"];
+            // 查找匹配的应用类型
+            bool found = false;
+            for (const auto& opt : OPUS_APPLICATION_OPTIONS) {
+                if (appStr.find(opt.description) != std::string::npos) {
+                    outputSettings.opusApplication = opt.opusApplication;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                outputSettings.opusApplication = 2048; // 默认VOIP
+            }
+        }
+        
+        // 加载输出参数
+        if (config.contains("output")) {
+            auto& output = config["output"];
+            outputSettings.outputFile = output["outputFile"];
+        }
+        
+        // 加载VAD配置
+        if (config.contains("vad")) {
+            auto& vad = config["vad"];
+            inputConfig.vadConfig.enabled = vad["enabled"];
+            inputConfig.vadConfig.threshold = vad["threshold"];
+            inputConfig.vadConfig.silenceTimeoutMs = vad["silenceTimeoutMs"];
+            inputConfig.vadConfig.sentenceTimeoutMs = vad["sentenceTimeoutMs"];
+            inputConfig.vadConfig.enableSilenceFrame = vad["enableSilenceFrame"];
+            inputConfig.vadConfig.enableSentenceDetection = vad["enableSentenceDetection"];
+            inputConfig.vadConfig.enableIdleDetection = vad["enableIdleDetection"];
+        }
+        
+        std::cout << "✓ Configuration loaded from: " << configPath << std::endl;
+        
+        // 显示加载的配置摘要
+        if (config.contains("metadata")) {
+            auto& metadata = config["metadata"];
+            std::cout << "  - Version: " << metadata.value("version", "unknown") << std::endl;
+            std::cout << "  - Description: " << metadata.value("description", "No description") << std::endl;
+            if (metadata.contains("timestamp")) {
+                std::time_t timestamp = metadata["timestamp"];
+                std::cout << "  - Last saved: " << std::ctime(&timestamp);
+            }
+        }
+        
+        // 显示实际加载的采样率（可能被高级用户修改过）
+        if (config.contains("audio") && static_cast<int>(inputConfig.sampleRate) != 48000) {
+            std::cout << "  ℹ️  Custom sample rate detected: " << static_cast<int>(inputConfig.sampleRate) << " Hz" << std::endl;
+            std::cout << "     System will auto-resample for module compatibility as needed." << std::endl;
+        }
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading audio config: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool AudioManager::saveAudioConfig(const AudioConfig& inputConfig, const OutputSettings& outputSettings, const std::string& configPath) {
+    try {
+        nlohmann::json config;
+        
+        // 基础音频参数 (Audio Parameters)
+        config["audio"]["sampleRate"] = 48000;  // 固定为48K
+        config["audio"]["sampleRate_description"] = "采样率 (Hz): 默认48000Hz，高级用户可修改为8000/16000/32000/44100/48000";
+        
+        config["audio"]["channels"] = static_cast<int>(inputConfig.channels);
+        config["audio"]["channels_description"] = "声道数: 1=单声道(MONO), 2=立体声(STEREO)";
+        
+        // 使用可读的字符串表示格式
+        std::string formatStr = (inputConfig.format == SampleFormat::FLOAT32) ? "FLOAT32" : 
+                               (inputConfig.format == SampleFormat::INT16) ? "INT16" :
+                               (inputConfig.format == SampleFormat::INT24) ? "INT24" : "UNKNOWN";
+        config["audio"]["format"] = formatStr;
+        config["audio"]["format_description"] = "音频格式: INT16=16位整数(默认), INT24=24位整数, FLOAT32=32位浮点";
+        config["audio"]["format_note"] = "高级用户可通过修改此字段更改采样格式，支持INT16/INT24/FLOAT32";
+        
+        config["audio"]["framesPerBuffer"] = inputConfig.framesPerBuffer;
+        config["audio"]["framesPerBuffer_description"] = "缓冲区帧数: 通常为 128/256/512";
+        
+        // 设备信息 (Device Information)
+        config["device"]["name"] = inputConfig.inputDevice.name;
+        config["device"]["index"] = inputConfig.inputDevice.index;
+        config["device"]["index_description"] = "设备索引: 系统分配的设备编号";
+        
+        std::string deviceTypeStr = (inputConfig.inputDevice.type == DeviceType::INPUT) ? "INPUT" :
+                                   (inputConfig.inputDevice.type == DeviceType::OUTPUT) ? "OUTPUT" :
+                                   (inputConfig.inputDevice.type == DeviceType::BOTH) ? "BOTH" : "UNKNOWN";
+        config["device"]["type"] = deviceTypeStr;
+        config["device"]["type_description"] = "设备类型: INPUT=输入, OUTPUT=输出, BOTH=双向";
+        
+        config["device"]["maxInputChannels"] = inputConfig.inputDevice.maxInputChannels;
+        config["device"]["maxOutputChannels"] = inputConfig.inputDevice.maxOutputChannels;
+        config["device"]["defaultSampleRate"] = inputConfig.inputDevice.defaultSampleRate;
+        config["device"]["defaultLatency"] = inputConfig.inputDevice.defaultLatency;
+        config["device"]["capabilities_description"] = "设备能力: 最大输入/输出通道数, 默认采样率和延迟";
+        
+        // 编码参数 (Encoding Parameters)
+        std::string encodingFormatStr = (outputSettings.format == EncodingFormat::WAV) ? "WAV" : "OPUS";
+        config["encoding"]["format"] = encodingFormatStr;
+        config["encoding"]["format_description"] = "编码格式: WAV=无损, OPUS=有损压缩";
+        
+        config["encoding"]["opusFrameLength"] = outputSettings.opusFrameLength;
+        config["encoding"]["opusBitrate"] = outputSettings.opusBitrate;
+        config["encoding"]["opusComplexity"] = outputSettings.opusComplexity;
+        
+        // 查找OPUS应用类型的描述
+        std::string opusAppStr = "UNKNOWN";
+        std::string opusAppDesc = "Unknown application type";
+        for (const auto& opt : OPUS_APPLICATION_OPTIONS) {
+            if (opt.opusApplication == outputSettings.opusApplication) {
+                opusAppStr = std::string(opt.description);
+                break;
+            }
+        }
+        config["encoding"]["opusApplication"] = opusAppStr;
+        config["encoding"]["opusApplication_description"] = "OPUS应用优化: VOIP=语音通话, Audio=音乐流媒体, Restricted=低延迟";
+        
+        // 输出参数 (Output Parameters)
+        config["output"]["outputFile"] = outputSettings.outputFile;
+        config["output"]["outputFile_description"] = "输出文件路径: 录音保存的完整文件路径";
+        config["output"]["resampling_note"] = "重采样处理: 系统会自动处理模块间采样率转换 (如rnnoise需要48K，OPUS支持多种采样率)";
+        
+        // VAD配置 (Voice Activity Detection)
+        config["vad"]["enabled"] = inputConfig.vadConfig.enabled;
+        config["vad"]["enabled_description"] = "语音活动检测总开关: true=启用VAD, false=禁用VAD (用户只需配置此项)";
+        
+        config["vad"]["threshold"] = inputConfig.vadConfig.threshold;
+        config["vad"]["threshold_description"] = "检测阈值: 0.0-1.0, 越低越敏感 (默认0.3, 建议范围0.2-0.5)";
+        
+        config["vad"]["silenceTimeoutMs"] = inputConfig.vadConfig.silenceTimeoutMs;
+        config["vad"]["silenceTimeoutMs_description"] = "静音超时(ms): 超过此时间的连续静音将触发检测 (默认1500ms)";
+        
+        config["vad"]["sentenceTimeoutMs"] = inputConfig.vadConfig.sentenceTimeoutMs;
+        config["vad"]["sentenceTimeoutMs_description"] = "句子间隔超时(ms): 句子之间的间隔检测时间 (默认800ms)";
+        
+        config["vad"]["enableSilenceFrame"] = inputConfig.vadConfig.enableSilenceFrame;
+        config["vad"]["enableSentenceDetection"] = inputConfig.vadConfig.enableSentenceDetection;
+        config["vad"]["enableIdleDetection"] = inputConfig.vadConfig.enableIdleDetection;
+        config["vad"]["features_description"] = "VAD详细功能开关: 静音帧检测/句子检测/空闲检测 (默认全部开启)";
+        config["vad"]["note"] = "注意: 用户只需通过程序选择VAD开/关，详细参数可在此JSON文件中调整";
+        
+        // 元数据 (Metadata)
+        config["metadata"]["version"] = "1.2";
+        config["metadata"]["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        config["metadata"]["description"] = "PerfX Audio Recording Configuration";
+        config["metadata"]["note"] = "此配置文件包含所有音频录制参数，可直接编辑或通过程序重新生成";
+        config["metadata"]["usage_note"] = "普通用户: 程序自动使用48K采样率; 高级用户: 可编辑sampleRate字段自定义采样率";
+        config["metadata"]["changes_v1.1"] = "移除手动resampling配置，系统现在自动处理采样率转换";
+        config["metadata"]["changes_v1.2"] = "固定48K采样率简化用户操作，高级用户可通过JSON配置自定义";
+        
+        // 写入文件
+        std::ofstream file(configPath);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open config file for writing: " << configPath << std::endl;
+            return false;
+        }
+        
+        file << config.dump(4); // 美化格式，缩进4个空格
+        file.close();
+        
+        std::cout << "✓ Configuration saved to: " << configPath << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving audio config: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 } // namespace audio

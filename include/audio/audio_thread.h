@@ -41,6 +41,9 @@ public:
     // 添加音频处理回调
     void addProcessor(std::shared_ptr<AudioProcessor> processor);
     
+    // 设置音频处理器
+    void setProcessor(std::shared_ptr<AudioProcessor> processor);
+    
     // 设置回调
     void setInputCallback(AudioCallback callback);
     
@@ -50,10 +53,7 @@ public:
     // 获取当前配置
     AudioConfig getCurrentConfig() const;
 
-    // 重采样相关函数
-    bool enableResampling(SampleRate targetRate);
-    void disableResampling();
-
+    //
     bool startRecording();
 
 private:

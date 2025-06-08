@@ -54,6 +54,7 @@ public:
      * @details 关闭设备并终止PortAudio
      */
     ~Impl() {
+        std::cout << "[DEBUG] ~AudioDevice::Impl called" << std::endl;
         closeDevice();
         Pa_Terminate();
     }
@@ -139,9 +140,38 @@ public:
             PaStreamParameters inputParameters;
             inputParameters.device = device.index;
             inputParameters.channelCount = static_cast<int>(config.channels);
-            inputParameters.sampleFormat = paInt16;  // 使用16位整数格式
+            inputParameters.sampleFormat = getPaSampleFormat(config.format);  // 使用配置中指定的格式
             inputParameters.suggestedLatency = deviceInfo->defaultLowInputLatency;
             inputParameters.hostApiSpecificStreamInfo = nullptr;
+
+            // 检查设备是否支持请求的格式
+            PaError formatCheck = Pa_IsFormatSupported(&inputParameters, nullptr, static_cast<double>(config.sampleRate));
+            if (formatCheck != paNoError) {
+                std::cout << "[WARNING] Device may not support requested format: " << Pa_GetErrorText(formatCheck) << std::endl;
+                std::cout << "[WARNING] Requested format: " << inputParameters.sampleFormat << " (INT16=" << paInt16 << ", FLOAT32=" << paFloat32 << ")" << std::endl;
+                std::cout << "[WARNING] Attempting to continue anyway..." << std::endl;
+                
+                // 尝试使用浮点格式作为备选
+                if (config.format == SampleFormat::INT16) {
+                    inputParameters.sampleFormat = paFloat32;
+                    formatCheck = Pa_IsFormatSupported(&inputParameters, nullptr, static_cast<double>(config.sampleRate));
+                    if (formatCheck == paNoError) {
+                        std::cout << "[INFO] Device supports FLOAT32, will use that instead" << std::endl;
+                        std::cout << "[WARNING] Audio callback will receive FLOAT32 data despite INT16 configuration!" << std::endl;
+                        // 更新配置以反映实际使用的格式
+                        // 注意：这里创建一个修改后的配置副本
+                        AudioConfig modifiedConfig = config;
+                        modifiedConfig.format = SampleFormat::FLOAT32;
+                        currentConfig_ = modifiedConfig;
+                        std::cout << "[INFO] Configuration updated to reflect actual device format: FLOAT32" << std::endl;
+                    } else {
+                        std::cout << "[ERROR] Device doesn't support FLOAT32 either: " << Pa_GetErrorText(formatCheck) << std::endl;
+                    }
+                }
+            } else {
+                std::cout << "[INFO] Device supports requested format: " << inputParameters.sampleFormat << std::endl;
+                currentConfig_ = config;
+            }
 
             // 打开音频流
             std::cout << "[DEBUG] Opening audio stream with device: " << device.name << std::endl;
@@ -394,7 +424,7 @@ private:
 //==============================================================================
 
 AudioDevice::AudioDevice() : impl_(std::make_unique<Impl>()) {}
-AudioDevice::~AudioDevice() = default;
+AudioDevice::~AudioDevice() { std::cout << "[DEBUG] ~AudioDevice called" << std::endl; }
 
 bool AudioDevice::initialize() { return impl_->initialize(); }
 std::vector<DeviceInfo> AudioDevice::getAvailableDevices() { return impl_->getAvailableDevices(); }

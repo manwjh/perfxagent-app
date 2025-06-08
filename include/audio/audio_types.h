@@ -12,6 +12,32 @@
 #include <functional>
 #include <nlohmann/json.hpp>
 
+// Debug configuration
+#ifndef NDEBUG
+    #define AUDIO_DEBUG 1
+#else
+    #define AUDIO_DEBUG 0
+#endif
+
+// Debug logging macros
+#if AUDIO_DEBUG
+    #include <iostream>
+    #include <sstream>
+    #define AUDIO_LOG(msg) do { \
+        std::stringstream ss; \
+        ss << msg; \
+        std::cout << "[AUDIO] " << ss.str() << std::endl; \
+    } while(0)
+    #define AUDIO_LOG_VAR(var) do { \
+        std::stringstream ss; \
+        ss << #var << " = " << var; \
+        std::cout << "[AUDIO] " << ss.str() << std::endl; \
+    } while(0)
+#else
+    #define AUDIO_LOG(msg)
+    #define AUDIO_LOG_VAR(var)
+#endif
+
 namespace perfx {
 namespace audio {
 
@@ -85,6 +111,61 @@ struct DeviceInfo {
     double defaultLatency;              ///< 默认延迟(秒)
 };
 
+// VAD状态枚举
+enum class VADState : int {
+    IDLE = 0,           ///< 空闲状态
+    SILENCE = 1,        ///< 静音状态
+    SPEAKING = 2,       ///< 说话状态
+    SENTENCE_END = 3    ///< 句子结束状态
+};
+
+// VAD配置结构
+struct VADConfig {
+    bool enabled = false;                  ///< 是否启用 VAD
+    float threshold = 0.5f;               ///< VAD 阈值 (0.0-1.0)
+    int silenceTimeoutMs = 500;           ///< 静音超时时间(毫秒)
+    int sentenceTimeoutMs = 1000;         ///< 句子结束超时时间(毫秒)
+    bool enableSilenceFrame = true;       ///< 是否启用静音帧
+    bool enableSentenceDetection = true;  ///< 是否启用句子检测
+    bool enableIdleDetection = true;      ///< 是否启用空闲检测
+
+    // 序列化方法
+    void fromJson(const std::string& jsonStr) {
+        auto j = nlohmann::json::parse(jsonStr);
+        enabled = j["enabled"];
+        threshold = j["threshold"];
+        silenceTimeoutMs = j["silenceTimeoutMs"];
+        sentenceTimeoutMs = j["sentenceTimeoutMs"];
+        enableSilenceFrame = j["enableSilenceFrame"];
+        enableSentenceDetection = j["enableSentenceDetection"];
+        enableIdleDetection = j["enableIdleDetection"];
+    }
+
+    std::string toJson() const {
+        nlohmann::json j = {
+            {"enabled", enabled},
+            {"threshold", threshold},
+            {"silenceTimeoutMs", silenceTimeoutMs},
+            {"sentenceTimeoutMs", sentenceTimeoutMs},
+            {"enableSilenceFrame", enableSilenceFrame},
+            {"enableSentenceDetection", enableSentenceDetection},
+            {"enableIdleDetection", enableIdleDetection}
+        };
+        return j.dump();
+    }
+};
+
+// VAD状态结构
+struct VADStatus {
+    VADState state = VADState::IDLE;      ///< 当前 VAD 状态
+    int64_t lastVoiceTime = 0;            ///< 最后一次检测到语音的时间
+    int64_t currentSilenceDuration = 0;   ///< 当前静音持续时间
+    bool isVoiceActive = false;           ///< 当前是否有语音活动
+    int silenceFrameCount = 0;            ///< 连续静音帧计数
+    int voiceFrameCount = 0;              ///< 连续语音帧计数
+    float voiceProbability = 0.0f;        ///< 当前帧的语音概率
+};
+
 /**
  * @brief 音频配置结构
  * 定义音频流的处理参数和配置选项
@@ -93,7 +174,7 @@ struct AudioConfig {
     // 基础参数
     SampleRate sampleRate = SampleRate::RATE_48000;     ///< 采样率
     ChannelCount channels = ChannelCount::MONO;         ///< 通道数
-    SampleFormat format = SampleFormat::INT16;          ///< 采样格式
+    SampleFormat format = SampleFormat::INT16;        ///< 采样格式
     int framesPerBuffer = 256;                          ///< 每缓冲帧数
 
     // 设备参数
@@ -108,10 +189,9 @@ struct AudioConfig {
     int opusComplexity = 10;                            ///< Opus复杂度
 
     // 处理参数
-    bool enableResampling = false;                      ///< 是否启用重采样
-    SampleRate targetSampleRate = SampleRate::RATE_48000; ///< 目标采样率
     bool enableVAD = false;                             ///< 是否启用语音检测
     bool enableAGC = false;                             ///< 是否启用自动增益控制
+    VADConfig vadConfig;                                ///< VAD配置
 
     // 录音参数
     std::string outputFile;                             ///< 输出文件名
@@ -129,10 +209,9 @@ struct AudioConfig {
         opusFrameLength = j["opusFrameLength"];
         opusBitrate = j["opusBitrate"];
         opusComplexity = j["opusComplexity"];
-        enableResampling = j["enableResampling"];
-        targetSampleRate = static_cast<SampleRate>(j["targetSampleRate"]);
         enableVAD = j["enableVAD"];
         enableAGC = j["enableAGC"];
+        vadConfig.fromJson(j["vadConfig"]);
         outputFile = j["outputFile"];
         autoStartRecording = j["autoStartRecording"];
         maxRecordingDuration = j["maxRecordingDuration"];
@@ -148,10 +227,9 @@ struct AudioConfig {
             {"opusFrameLength", opusFrameLength},
             {"opusBitrate", opusBitrate},
             {"opusComplexity", opusComplexity},
-            {"enableResampling", enableResampling},
-            {"targetSampleRate", static_cast<int>(targetSampleRate)},
             {"enableVAD", enableVAD},
             {"enableAGC", enableAGC},
+            {"vadConfig", vadConfig.toJson()},
             {"outputFile", outputFile},
             {"autoStartRecording", autoStartRecording},
             {"maxRecordingDuration", maxRecordingDuration}
@@ -175,7 +253,7 @@ struct AudioConfig {
         AudioConfig config;
         config.sampleRate = SampleRate::RATE_48000;
         config.channels = ChannelCount::STEREO;
-        config.format = SampleFormat::INT16;
+        config.format = SampleFormat::FLOAT32;
         config.framesPerBuffer = 256;
         config.encodingFormat = EncodingFormat::WAV;
         return config;
@@ -242,6 +320,73 @@ struct OggHeader {
         char vendor_string[32];  // 供应商字符串
         uint32_t user_comment_list_length; // 用户注释列表长度
     } opus_tags;
+};
+
+/**
+ * @brief Opus帧长度选项结构
+ * 定义了不同帧长度对应的采样数和描述信息
+ */
+struct OpusFrameOption {
+    const char* description;    // 选项描述
+    int lengthMs;              // 帧长度(毫秒)
+    int samples48k;            // 48kHz采样率下的采样数
+};
+
+/**
+ * @brief 预定义的Opus帧长度选项
+ * 基于libopus支持的标准值，从2.5ms到60ms
+ */
+static const OpusFrameOption OPUS_FRAME_OPTIONS[] = {
+    {"2.5ms (ultra-low latency, music)", 2, 120},   // 2.5ms @ 48kHz = 120 samples
+    {"5ms (very low latency)", 5, 240},             // 5ms @ 48kHz = 240 samples  
+    {"10ms (low latency, voice)", 10, 480},         // 10ms @ 48kHz = 480 samples
+    {"20ms (default, best for voice)", 20, 960},    // 20ms @ 48kHz = 960 samples
+    {"40ms (balanced)", 40, 1920},                  // 40ms @ 48kHz = 1920 samples
+    {"60ms (higher compression)", 60, 2880}         // 60ms @ 48kHz = 2880 samples
+};
+
+/**
+ * @brief Opus比特率选项结构
+ * 定义了不同比特率对应的描述信息
+ */
+struct OpusBitrateOption {
+    const char* description;    // 选项描述
+    int bitrate;               // 比特率(bps)
+    int opusConstant;          // 对应的OPUS常量值
+};
+
+/**
+ * @brief 预定义的Opus比特率选项
+ * 基于libopus推荐值，从6kbps到128kbps
+ */
+static const OpusBitrateOption OPUS_BITRATE_OPTIONS[] = {
+    {"6kbps (very low quality, extreme compression)", 6000, 6000},
+    {"8kbps (low quality, narrowband voice)", 8000, 8000},
+    {"16kbps (medium quality, voice only)", 16000, 16000},
+    {"24kbps (good quality, voice)", 24000, 24000},
+    {"32kbps (high quality, voice)", 32000, 32000},
+    {"48kbps (very high quality, wideband)", 48000, 48000},
+    {"64kbps (excellent quality)", 64000, 64000},
+    {"128kbps (maximum quality, music)", 128000, 128000}
+};
+
+/**
+ * @brief Opus应用类型选项结构
+ * 定义了不同应用场景的优化选项
+ */
+struct OpusApplicationOption {
+    const char* description;    // 选项描述
+    int opusApplication;        // 对应OPUS_APPLICATION_*常量
+};
+
+/**
+ * @brief 预定义的Opus应用类型选项
+ * 包括VOIP、音频流和低延迟三种模式
+ */
+static const OpusApplicationOption OPUS_APPLICATION_OPTIONS[] = {
+    {"Voice over IP (VOIP)", 2048},      // OPUS_APPLICATION_VOIP = 2048
+    {"Audio streaming", 2049},           // OPUS_APPLICATION_AUDIO = 2049  
+    {"Restricted low-delay", 2051}       // OPUS_APPLICATION_RESTRICTED_LOWDELAY = 2051
 };
 
 } // namespace audio

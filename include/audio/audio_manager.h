@@ -13,6 +13,19 @@
 namespace perfx {
 namespace audio {
 
+/**
+ * @brief 输出设置结构
+ * 定义了音频输出的相关参数
+ */
+struct OutputSettings {
+    EncodingFormat format = EncodingFormat::WAV;  // 输出格式
+    int opusFrameLength = 20;                     // Opus帧长度(ms)
+    int opusBitrate = 32000;                      // Opus比特率(bps)
+    int opusComplexity = 5;                       // Opus复杂度(0-10)
+    int opusApplication = 2048;                   // Opus应用类型(VOIP/Audio/LowDelay)
+    std::string outputFile;                       // 输出文件名
+};
+
 class AudioManager {
 public:
     static AudioManager& getInstance() {
@@ -28,8 +41,6 @@ public:
     ~AudioManager();
 
     bool initialize(const AudioConfig& config = AudioConfig::getDefaultInputConfig());
-    bool loadConfig(const std::string& configPath);
-    bool saveConfig(const std::string& configPath);
     bool startRecording(const std::string& outputFile);
     bool stopRecording();
     bool updateConfig(const AudioConfig& config);
@@ -96,6 +107,14 @@ public:
     // 获取最后一次错误信息
     std::string getLastError() const { return lastError_; }
 
+    const VADStatus& getVADStatus() const;
+
+    // 从JSON文件加载音频配置
+    bool loadAudioConfig(AudioConfig& inputConfig, OutputSettings& outputSettings, const std::string& configPath);
+    
+    // 保存音频配置到JSON文件
+    bool saveAudioConfig(const AudioConfig& inputConfig, const OutputSettings& outputSettings, const std::string& configPath);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -103,7 +122,7 @@ private:
     bool initialized_ = false;
     bool isRecording_ = false;
     std::unique_ptr<AudioProcessor> processor_;
-    std::unique_ptr<AudioThread> thread_;
+    std::unique_ptr<AudioThread> audioStreamThread_;
     std::string currentOutputFile_;
     std::vector<int16_t> recordingBuffer_;
     std::unique_ptr<AudioDevice> device_;

@@ -15,18 +15,9 @@ public:
     // 初始化处理器
     bool initialize(const AudioConfig& config);
     void updateConfig(const AudioConfig& config);
-    const AudioConfig& getConfig() const { return config_; }
+    const AudioConfig& getConfig() const;
     void processAudio(const void* input, void* output, unsigned long frameCount);
     
-    // 重采样相关函数
-    bool startResampling(SampleRate fromRate, SampleRate toRate);
-    bool processResampling(const void* input, size_t inputFrames,
-                          void* output, size_t& outputFrames);
-    void stopResampling();
-    bool resample(const void* input, size_t inputFrames,
-                 void* output, size_t outputFrames,
-                 SampleRate fromRate, SampleRate toRate);
-
     // Opus 编码解码相关函数
     bool encodeOpus(const void* input, size_t frames, std::vector<std::vector<uint8_t>>& encodedFrames);
     bool decodeOpus(const std::vector<uint8_t>& input, void* output, size_t& outputFrames);
@@ -42,6 +33,19 @@ public:
     // 设置编码格式
     void setEncodingFormat(EncodingFormat format);
     void setOpusFrameLength(int frameLength);
+
+    // VAD 相关函数
+    bool initializeVAD(const VADConfig& config);
+    bool isVoiceActive(const float* input, size_t frameCount);
+    bool isVoiceActive(const int16_t* input, size_t frameCount);
+    void setVADThreshold(float threshold);
+    float getVADThreshold() const;
+    const VADStatus& getVADStatus() const;
+    void updateVADConfig(const VADConfig& config);
+    const VADConfig& getVADConfig() const;
+    bool shouldInsertSilenceFrame() const;
+    bool isSentenceEnd() const;
+    bool isIdle() const;
 
     int getSampleRate() const { return static_cast<int>(config_.sampleRate); }
     int getChannels() const { return static_cast<int>(config_.channels); }

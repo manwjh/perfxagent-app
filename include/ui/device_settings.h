@@ -19,7 +19,6 @@
 #include "audio/audio_device.h"
 #include "audio/audio_manager.h"
 #include "audio/audio_thread.h"
-#include "core/config_manager.h"
 
 namespace perfx {
 namespace ui {

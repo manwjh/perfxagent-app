@@ -27,14 +27,21 @@ public:
     /**
      * @brief 构造函数，初始化音频处理相关的成员变量
      */
-    Impl() : stream_(nullptr), running_(false), hasInputDevice_(false), hasOutputDevice_(false),
-             resamplingEnabled_(false), resamplingProcessor_(nullptr) {}
+    Impl() : stream_(nullptr), running_(false), hasInputDevice_(false), hasOutputDevice_(false) {}
 
     /**
      * @brief 析构函数，确保在对象销毁时停止音频流
      */
     ~Impl() {
-        stop();
+        std::cout << "[DEBUG] ~AudioThread::Impl called" << std::endl;
+        try {
+            stop();
+        } catch (const std::exception& e) {
+            std::cerr << "[ERROR] Exception in AudioThread destructor: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[ERROR] Unknown exception in AudioThread destructor" << std::endl;
+        }
+        std::cout << "[DEBUG] ~AudioThread::Impl completed" << std::endl;
     }
 
     /**
@@ -44,6 +51,13 @@ public:
      */
     bool initialize(AudioProcessor* processor) {
         config_ = processor->getConfig();
+        
+        // DEBUG: 显示从AudioProcessor获取的配置
+        std::cout << "[DEBUG] AudioThread::initialize received config from AudioProcessor:" << std::endl;
+        std::cout << "  - sampleRate: " << static_cast<int>(config_.sampleRate) << std::endl;
+        std::cout << "  - channels: " << static_cast<int>(config_.channels) << std::endl;
+        std::cout << "  - format: " << static_cast<int>(config_.format) << " (INT16=0, FLOAT32=3)" << std::endl;
+        
         return true;
     }
 
@@ -60,14 +74,14 @@ public:
                   << ", channels=" << inputParams_.channelCount 
                   << ", sampleRate=" << static_cast<int>(config_.sampleRate) << std::endl;
 
-        // 如果启用了重采样，初始化重采样处理器
-        if (resamplingEnabled_ && resamplingProcessor_) {
-            int targetSampleRate_ = static_cast<int>(config_.sampleRate);
-            if (!resamplingProcessor_->startResampling(
-                static_cast<SampleRate>(config_.sampleRate),
-                static_cast<SampleRate>(targetSampleRate_))) {
-                throw std::runtime_error("Failed to initialize resampling");
+        // 检查输入设备是否有效
+        if (hasInputDevice_) {
+            const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(inputParams_.device);
+            if (!deviceInfo) {
+                std::cerr << "[ERROR] Invalid input device index: " << inputParams_.device << std::endl;
+                throw std::runtime_error("Invalid input device index");
             }
+            std::cout << "[DEBUG] Input device info: " << deviceInfo->name << std::endl;
         }
 
         // 打开音频流
@@ -106,20 +120,38 @@ public:
      * @brief 停止音频流并清理资源
      */
     void stop() {
+        std::cout << "[DEBUG] AudioThread::stop() called" << std::endl;
         if (!running_) return;
 
-        if (stream_) {
-            Pa_StopStream(stream_);
-            Pa_CloseStream(stream_);
-            stream_ = nullptr;
+        std::cout << "[DEBUG] Stopping recording thread..." << std::endl;
+        // 首先停止录音线程
+        if (isRecording_) {
+            isRecording_ = false;
+            if (recordingThread_.joinable()) {
+                recordingThread_.join();
+                std::cout << "[DEBUG] Recording thread stopped" << std::endl;
+            }
         }
 
-        // 如果启用了重采样，停止重采样处理器
-        if (resamplingEnabled_ && resamplingProcessor_) {
-            resamplingProcessor_->stopResampling();
+        std::cout << "[DEBUG] Stopping PortAudio stream..." << std::endl;
+        // 然后停止音频流
+        if (stream_) {
+            PaError err = Pa_StopStream(stream_);
+            if (err != paNoError) {
+                std::cerr << "[WARNING] Error stopping stream: " << Pa_GetErrorText(err) << std::endl;
+            }
+            
+            err = Pa_CloseStream(stream_);
+            if (err != paNoError) {
+                std::cerr << "[WARNING] Error closing stream: " << Pa_GetErrorText(err) << std::endl;
+            }
+            
+            stream_ = nullptr;
+            std::cout << "[DEBUG] PortAudio stream stopped" << std::endl;
         }
 
         running_ = false;
+        std::cout << "[DEBUG] AudioThread::stop() completed" << std::endl;
     }
 
     /**
@@ -130,29 +162,48 @@ public:
     bool setInputDevice(const DeviceInfo& device) {
         if (running_) return false;
 
-        std::cout << "[DEBUG] setInputDevice: index=" << device.index 
-                  << ", name=" << device.name 
-                  << ", channels=" << device.maxInputChannels 
-                  << ", sampleRate=" << device.defaultSampleRate << std::endl;
-
-        // 获取PortAudio设备信息
-        const PaDeviceInfo* paDeviceInfo = Pa_GetDeviceInfo(device.index);
-        if (!paDeviceInfo) {
-            std::cerr << "[ERROR] Invalid device index: " << device.index << std::endl;
-            return false;
-        }
+        // DEBUG: 显示当前配置
+        std::cout << "[DEBUG] AudioThread::setInputDevice called with current config:" << std::endl;
+        std::cout << "  - sampleRate: " << static_cast<int>(config_.sampleRate) << std::endl;
+        std::cout << "  - channels: " << static_cast<int>(config_.channels) << std::endl;
+        std::cout << "  - format: " << static_cast<int>(config_.format) << " (INT16=0, FLOAT32=3)" << std::endl;
 
         inputDevice_ = device;
-        inputParams_.device = device.index;  // 使用原始设备索引
+        inputParams_.device = device.index;
         inputParams_.channelCount = static_cast<int>(config_.channels);
-        inputParams_.sampleFormat = paInt16;  // 使用16位整数格式
-        inputParams_.suggestedLatency = paDeviceInfo->defaultLowInputLatency;
+        
+        // 根据配置选择正确的采样格式
+        switch (config_.format) {
+            case SampleFormat::FLOAT32:
+                inputParams_.sampleFormat = paFloat32;
+                std::cout << "[DEBUG] Using FLOAT32 format for input" << std::endl;
+                break;
+            case SampleFormat::INT16:
+                inputParams_.sampleFormat = paInt16;
+                std::cout << "[DEBUG] Using INT16 format for input" << std::endl;
+                break;
+            default:
+                std::cerr << "[ERROR] Unsupported sample format: " << static_cast<int>(config_.format) << std::endl;
+                return false;
+        }
+        
+        // 通用延迟优化：避免超低延迟导致的音频问题
+        double defaultLatency = Pa_GetDeviceInfo(device.index)->defaultLowInputLatency;
+        const double MIN_SAFE_LATENCY = 0.100;  // 提高到100ms最小安全延迟
+        
+        inputParams_.suggestedLatency = std::max(defaultLatency, MIN_SAFE_LATENCY);
+        
+        if (defaultLatency < MIN_SAFE_LATENCY) {
+            std::cout << "[DEBUG] Device default latency (" << defaultLatency 
+                     << "s) too low, using safe minimum: " << MIN_SAFE_LATENCY << "s" << std::endl;
+        }
         inputParams_.hostApiSpecificStreamInfo = nullptr;
         hasInputDevice_ = true;
 
-        std::cout << "[DEBUG] Device parameters set: index=" << inputParams_.device 
-                  << ", channels=" << inputParams_.channelCount 
-                  << ", latency=" << inputParams_.suggestedLatency << std::endl;
+        std::cout << "[DEBUG] Device parameters set: index=" << device.index 
+                 << ", channels=" << inputParams_.channelCount 
+                 << ", format=" << inputParams_.sampleFormat 
+                 << ", latency=" << inputParams_.suggestedLatency << std::endl;
 
         return true;
     }
@@ -193,30 +244,6 @@ public:
     }
 
     /**
-     * @brief 启用重采样功能
-     * @param targetRate 目标采样率
-     * @return 启用是否成功
-     */
-    bool enableResampling(SampleRate targetRate) {
-        if (running_) return false;
-
-        resamplingEnabled_ = true;
-        targetSampleRate_ = static_cast<int>(targetRate);
-        resamplingProcessor_ = std::make_shared<AudioProcessor>();
-        return resamplingProcessor_->initialize(config_);
-    }
-
-    /**
-     * @brief 禁用重采样功能
-     */
-    void disableResampling() {
-        if (running_) return;
-
-        resamplingEnabled_ = false;
-        resamplingProcessor_.reset();
-    }
-
-    /**
      * @brief 获取音频流运行状态
      * @return 是否正在运行
      */
@@ -232,6 +259,12 @@ public:
         return config_;
     }
 
+    void setProcessor(std::shared_ptr<AudioProcessor> processor) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        processor_ = processor;
+        std::cout << "[DEBUG] AudioThread processor set: " << static_cast<void*>(processor.get()) << std::endl;
+    }
+
     bool startRecording() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (isRecording_) {
@@ -240,30 +273,23 @@ public:
 
         // 打印调用堆栈，辅助排查重复初始化问题
         std::cerr << "AudioThread::startRecording called" << std::endl;
-        // 这里可以加入 backtrace 打印，但需要额外库支持，暂时用简单日志
 
         // 确保音频处理器已初始化
         if (!processor_) {
-            std::cerr << "Audio processor not initialized, initializing now..." << std::endl;
-            processor_ = std::make_shared<AudioProcessor>();
-            if (!processor_->initialize(config_)) {
-                std::cerr << "Failed to initialize audio processor" << std::endl;
-                return false;
-            }
+            std::cerr << "[ERROR] Audio processor not set! AudioThread should receive processor from AudioManager." << std::endl;
+            return false;
         }
 
         // 开始录音
         isRecording_ = true;
-        recordingThread_ = std::thread(&AudioThread::Impl::recordingThread, this);
-        return true;
-    }
+        recordingThread_ = std::thread([this]() {
+            while (isRecording_) {
+                // 等待音频数据
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
 
-    void recordingThread() {
-        // 录音线程实现
-        while (isRecording_) {
-            // 录音逻辑
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+        return true;
     }
 
 private:
@@ -277,42 +303,65 @@ private:
      * @param userData 用户数据
      * @return 回调状态
      */
-    static int audioCallback(const void* input, void* output,
+    static int audioCallback(const void* input, void* /*output*/,
                            unsigned long frameCount,
                            const PaStreamCallbackTimeInfo* /*timeInfo*/,
                            PaStreamCallbackFlags /*statusFlags*/,
                            void* userData) {
         auto* impl = static_cast<Impl*>(userData);
         
-        // 处理输入音频数据
-        if (input) {
-            if (impl->resamplingEnabled_ && impl->resamplingProcessor_) {
-                // 分配重采样输出缓冲区
-                size_t samplesPerFrame = static_cast<int>(impl->config_.channels);
-                std::vector<int16_t> resampledData(frameCount * samplesPerFrame);
-                size_t outputFrames = frameCount;
-
-                // 执行重采样处理
-                if (impl->resamplingProcessor_->processResampling(
-                    input, frameCount, resampledData.data(), outputFrames)) {
-                    // 调用用户回调，传入重采样后的数据
-                    if (impl->inputCallback_) {
-                        impl->inputCallback_(resampledData.data(), nullptr, outputFrames);
-                    }
-                }
-            } else {
-                // 直接调用用户回调
-                if (impl->inputCallback_) {
-                    impl->inputCallback_(input, nullptr, frameCount);
+        // 严格输入校验
+        if (!input) {
+            std::cerr << "[ERROR] Input buffer is NULL in audio callback" << std::endl;
+            return paContinue;
+        }
+        if (frameCount == 0) {
+            std::cerr << "[ERROR] Frame count is 0 in audio callback" << std::endl;
+            return paContinue;
+        }
+        
+        // 根据配置的格式检查输入数据
+        bool dataValid = true;
+        if (impl->config_.format == SampleFormat::FLOAT32) {
+            const float* floatInput = static_cast<const float*>(input);
+            for (unsigned long i = 0; i < frameCount; ++i) {
+                if (!std::isfinite(floatInput[i])) {
+                    std::cerr << "[ERROR] Invalid float32 data at index " << i << ": " << floatInput[i] << std::endl;
+                    dataValid = false;
+                    break;
                 }
             }
-        }
+        } else if (impl->config_.format == SampleFormat::INT16) {
+            // INT16数据不需要检查NaN/inf，因为整数不会有这些值
+            // INT16数据是有效的，不需要额外检查
+            static int callbackCount = 0;
+            static std::chrono::steady_clock::time_point lastLogTime = std::chrono::steady_clock::now();
+            static const int LOG_INTERVAL_MS = 1000; // 每秒更新一次日志
 
-        // 处理输出音频数据
-        if (output) {
-            // 这里可以添加输出处理逻辑
-        }
+            callbackCount++;
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastLogTime).count();
 
+            if (elapsed >= LOG_INTERVAL_MS) {
+                std::cout << "\r[audioCallback] Processing INT16 input data, frameCount=240, total callbacks=" 
+                          << callbackCount << std::flush;
+                callbackCount = 0;
+                lastLogTime = now;
+            }
+        } else {
+            std::cerr << "[ERROR] Unsupported audio format in callback" << std::endl;
+            dataValid = false;
+        }
+        
+        if (!dataValid) {
+            std::cerr << "[ERROR] Invalid audio data detected, skipping frame" << std::endl;
+            return paContinue;
+        }
+        
+        if (impl->inputCallback_) {
+            impl->inputCallback_(input, nullptr, frameCount);
+        }
+        
         return paContinue;
     }
 
@@ -329,11 +378,6 @@ private:
     std::vector<std::shared_ptr<AudioProcessor>> processors_; ///< 音频处理器列表
     AudioCallback inputCallback_;                         ///< 输入回调函数
 
-    // 重采样相关
-    bool resamplingEnabled_;                              ///< 重采样启用标志
-    int targetSampleRate_;                                ///< 目标采样率
-    std::shared_ptr<AudioProcessor> resamplingProcessor_; ///< 重采样处理器
-
     std::mutex mutex_;
     bool isRecording_;
     std::thread recordingThread_;
@@ -342,7 +386,7 @@ private:
 
 // AudioThread类实现
 AudioThread::AudioThread() : impl_(std::make_unique<Impl>()) {}
-AudioThread::~AudioThread() = default;
+AudioThread::~AudioThread() { std::cout << "[DEBUG] ~AudioThread called" << std::endl; }
 
 bool AudioThread::initialize(AudioProcessor* processor) { return impl_->initialize(processor); }
 void AudioThread::start() { impl_->start(); }
@@ -351,10 +395,12 @@ bool AudioThread::setInputDevice(const DeviceInfo& device) { return impl_->setIn
 bool AudioThread::setOutputDevice(const DeviceInfo& device) { return impl_->setOutputDevice(device); }
 void AudioThread::addProcessor(std::shared_ptr<AudioProcessor> processor) { impl_->addProcessor(processor); }
 void AudioThread::setInputCallback(AudioCallback callback) { impl_->setInputCallback(std::move(callback)); }
-bool AudioThread::enableResampling(SampleRate targetRate) { return impl_->enableResampling(targetRate); }
-void AudioThread::disableResampling() { impl_->disableResampling(); }
 bool AudioThread::isRunning() const { return impl_->isRunning(); }
 AudioConfig AudioThread::getCurrentConfig() const { return impl_->getCurrentConfig(); }
+
+void AudioThread::setProcessor(std::shared_ptr<AudioProcessor> processor) {
+    impl_->setProcessor(processor);
+}
 
 bool AudioThread::startRecording() {
     return impl_->startRecording();

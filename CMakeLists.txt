@@ -1,14 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(perfxagent-app VERSION 0.1.0 LANGUAGES CXX)
+project(perfxagent-app VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# 添加调试标志
-set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
+# Debug configuration
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions(-DDEBUG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
+else()
+    add_definitions(-DNDEBUG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+endif()
 
 # 设置版本号
 set(PERFXAGENT_VERSION_MAJOR 1)
@@ -122,19 +132,51 @@ find_package(PortAudio 19.7.0 REQUIRED)
 find_package(Opus REQUIRED)
 find_package(Ogg REQUIRED)
 find_package(SndFile REQUIRED)
-# find_package(WebRTC QUIET)  # Temporarily disabled
 find_package(SAMPLERATE REQUIRED)
 find_package(nlohmann_json 3.11.3 REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(OpenCV REQUIRED)
+
+# RNNoise
+set(RNNOISE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rnnoise)
+set(RNNOISE_SOURCES
+    ${RNNOISE_ROOT}/src/denoise.c
+    ${RNNOISE_ROOT}/src/rnnoise_data.c
+    ${RNNOISE_ROOT}/src/kiss_fft.c
+    ${RNNOISE_ROOT}/src/pitch.c
+    ${RNNOISE_ROOT}/src/rnn.c
+    ${RNNOISE_ROOT}/src/nnet.c
+    ${RNNOISE_ROOT}/src/nnet_default.c
+    ${RNNOISE_ROOT}/src/celt_lpc.c
+    ${RNNOISE_ROOT}/src/rnnoise_tables.c
+    ${RNNOISE_ROOT}/src/parse_lpcnet_weights.c
+)
+include_directories(
+    ${RNNOISE_ROOT}/include
+    ${RNNOISE_ROOT}/src
+)
+add_definitions(-DHAVE_CONFIG_H)
+
+# RNNoise compilation options
+add_definitions(-DHAVE_CONFIG_H)
+
+# Include RNNoise headers and source files
+include_directories(
+    ${RNNOISE_ROOT}/src
+)
+
+# Set compilation flags for Apple platforms
+if(APPLE)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native")
+endif()
+
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavcodec
     libavformat
     libavutil
-    libswresample
     libswscale
 )
-# find_package(GTest REQUIRED)
 
 # GTest 手动路径设置（Homebrew 安装）
 set(GTEST_ROOT /opt/homebrew/Cellar/googletest/1.17.0)
@@ -142,7 +184,8 @@ set(GTEST_INCLUDE_DIR ${GTEST_ROOT}/include)
 set(GTEST_LIBRARY ${GTEST_ROOT}/lib/libgtest.a)
 set(GTEST_MAIN_LIBRARY ${GTEST_ROOT}/lib/libgtest_main.a)
 include_directories(${GTEST_INCLUDE_DIR})
-link_libraries(${GTEST_LIBRARY} ${GTEST_MAIN_LIBRARY})
+# 只链接一次 GTest 库
+link_libraries(${GTEST_LIBRARY})
 
 # Boost 配置
 set(Boost_USE_STATIC_LIBS OFF)
@@ -174,12 +217,12 @@ set(SOURCES
     src/ui/device_settings.cpp
     src/ui/hello_window.cpp
     src/audio/audio_device.cpp
-    src/core/config_manager.cpp
     src/connection/thread_pool.cpp
     src/connection/connection_manager.cpp
     src/audio/audio_manager.cpp
     src/camera/camera_device.cpp
     src/camera/camera_manager.cpp
+    ${RNNOISE_SOURCES}
 )
 
 # 添加头文件
@@ -189,7 +232,6 @@ set(HEADERS
     include/ui/device_settings.h
     include/ui/hello_window.h
     include/audio/audio_device.h
-    include/core/config_manager.h
     include/connection/thread_pool.h
     include/connection/connection_manager.h
     include/audio/audio_manager.h
@@ -243,7 +285,7 @@ set(AUDIO_HEADERS
 )
 
 # 创建音频库
-add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS})
+add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS} ${RNNOISE_SOURCES})
 
 # 设置音频库包含目录
 target_include_directories(perfx_audio PUBLIC
@@ -252,6 +294,11 @@ target_include_directories(perfx_audio PUBLIC
     ${PortAudio_INCLUDE_DIRS}
     ${PORTAUDIO_PREFIX}/include
     ${SndFile_INCLUDE_DIRS}
+    ${OPUS_INCLUDE_DIRS}
+    ${OGG_INCLUDE_DIRS}
+    ${SAMPLERATE_INCLUDE_DIRS}
+    ${RNNOISE_ROOT}/include
+    ${RNNOISE_ROOT}/src
 )
 
 # 链接音频库依赖
@@ -312,7 +359,7 @@ else()
 endif()
 
 # 创建可执行文件
-add_executable(perfxagent-app ${SOURCES} ${HEADERS})
+add_executable(perfxagent-app ${SOURCES} ${HEADERS} ${RNNOISE_SOURCES})
 
 # 添加examples目录
 add_subdirectory(examples)
@@ -322,7 +369,11 @@ target_include_directories(perfxagent-app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${PortAudio_INCLUDE_DIRS}
-    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
+    ${Opus_INCLUDE_DIRS}
+    ${Ogg_INCLUDE_DIRS}
+    ${SndFile_INCLUDE_DIRS}
+    ${SAMPLERATE_INCLUDE_DIRS}
+    ${nlohmann_json_INCLUDE_DIRS}
 )
 
 # 链接库
@@ -335,12 +386,15 @@ target_link_libraries(perfxagent-app PRIVATE
     Qt6::WebSockets
     Qt6::Multimedia
     ${PortAudio_LIBRARIES}
+    ${Opus_LIBRARIES}
+    ${Ogg_LIBRARIES}
+    ${SndFile_LIBRARIES}
+    ${SAMPLERATE_LIBRARIES}
     OpenSSL::SSL
     OpenSSL::Crypto
     nlohmann_json::nlohmann_json
     Boost::system
     Boost::thread
-    $<$<PLATFORM_ID:Darwin>:${BOOST_LIBRARYDIR}/libboost_url.dylib>
     perfx_audio
     perfx_connection
     ${OpenCV_LIBS}
@@ -372,7 +426,11 @@ target_include_directories(perfxagent-app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${PortAudio_INCLUDE_DIRS}
-    $<$<BOOL:${WebRTC_FOUND}>:${WebRTC_INCLUDE_DIRS}>
+    ${Opus_INCLUDE_DIRS}
+    ${Ogg_INCLUDE_DIRS}
+    ${SndFile_INCLUDE_DIRS}
+    ${SAMPLERATE_INCLUDE_DIRS}
+    ${nlohmann_json_INCLUDE_DIRS}
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
     ${Qt6Widgets_INCLUDE_DIRS}
@@ -380,6 +438,7 @@ target_include_directories(perfxagent-app PRIVATE
     ${Qt6WebEngineWidgets_INCLUDE_DIRS}
     ${Qt6WebSockets_INCLUDE_DIRS}
     ${Qt6Multimedia_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIR}
     ${Boost_INCLUDE_DIRS}
     ${BOOST_INCLUDEDIR}
@@ -390,7 +449,6 @@ target_include_directories(perfxagent-app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/core
     ${CMAKE_CURRENT_SOURCE_DIR}/include/connection
     ${CMAKE_CURRENT_SOURCE_DIR}/include/camera
-    ${nlohmann_json_INCLUDE_DIRS}
 )
 
 # 设置输出目录
