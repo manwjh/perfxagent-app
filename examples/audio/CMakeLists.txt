@@ -46,6 +46,7 @@ target_link_libraries(audio_example PRIVATE
     ${SAMPLERATE_LIBRARIES}
     nlohmann_json::nlohmann_json
     PkgConfig::FFMPEG
+    ogg
 )
 target_link_libraries(pa_record_example PRIVATE
     ${PortAudio_LIBRARIES}

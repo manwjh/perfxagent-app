@@ -111,60 +111,6 @@ struct DeviceInfo {
     double defaultLatency;              ///< 默认延迟(秒)
 };
 
-// VAD状态枚举
-enum class VADState : int {
-    IDLE = 0,           ///< 空闲状态
-    SILENCE = 1,        ///< 静音状态
-    SPEAKING = 2,       ///< 说话状态
-    SENTENCE_END = 3    ///< 句子结束状态
-};
-
-// VAD配置结构
-struct VADConfig {
-    bool enabled = false;                  ///< 是否启用 VAD
-    float threshold = 0.5f;               ///< VAD 阈值 (0.0-1.0)
-    int silenceTimeoutMs = 500;           ///< 静音超时时间(毫秒)
-    int sentenceTimeoutMs = 1000;         ///< 句子结束超时时间(毫秒)
-    bool enableSilenceFrame = true;       ///< 是否启用静音帧
-    bool enableSentenceDetection = true;  ///< 是否启用句子检测
-    bool enableIdleDetection = true;      ///< 是否启用空闲检测
-
-    // 序列化方法
-    void fromJson(const std::string& jsonStr) {
-        auto j = nlohmann::json::parse(jsonStr);
-        enabled = j["enabled"];
-        threshold = j["threshold"];
-        silenceTimeoutMs = j["silenceTimeoutMs"];
-        sentenceTimeoutMs = j["sentenceTimeoutMs"];
-        enableSilenceFrame = j["enableSilenceFrame"];
-        enableSentenceDetection = j["enableSentenceDetection"];
-        enableIdleDetection = j["enableIdleDetection"];
-    }
-
-    std::string toJson() const {
-        nlohmann::json j = {
-            {"enabled", enabled},
-            {"threshold", threshold},
-            {"silenceTimeoutMs", silenceTimeoutMs},
-            {"sentenceTimeoutMs", sentenceTimeoutMs},
-            {"enableSilenceFrame", enableSilenceFrame},
-            {"enableSentenceDetection", enableSentenceDetection},
-            {"enableIdleDetection", enableIdleDetection}
-        };
-        return j.dump();
-    }
-};
-
-// VAD状态结构
-struct VADStatus {
-    VADState state = VADState::IDLE;      ///< 当前 VAD 状态
-    int64_t lastVoiceTime = 0;            ///< 最后一次检测到语音的时间
-    int64_t currentSilenceDuration = 0;   ///< 当前静音持续时间
-    bool isVoiceActive = false;           ///< 当前是否有语音活动
-    int silenceFrameCount = 0;            ///< 连续静音帧计数
-    int voiceFrameCount = 0;              ///< 连续语音帧计数
-    float voiceProbability = 0.0f;        ///< 当前帧的语音概率
-};
 
 /**
  * @brief 音频配置结构
@@ -189,9 +135,7 @@ struct AudioConfig {
     int opusComplexity = 10;                            ///< Opus复杂度
 
     // 处理参数
-    bool enableVAD = false;                             ///< 是否启用语音检测
     bool enableAGC = false;                             ///< 是否启用自动增益控制
-    VADConfig vadConfig;                                ///< VAD配置
 
     // 录音参数
     std::string outputFile;                             ///< 输出文件名
@@ -209,9 +153,7 @@ struct AudioConfig {
         opusFrameLength = j["opusFrameLength"];
         opusBitrate = j["opusBitrate"];
         opusComplexity = j["opusComplexity"];
-        enableVAD = j["enableVAD"];
         enableAGC = j["enableAGC"];
-        vadConfig.fromJson(j["vadConfig"]);
         outputFile = j["outputFile"];
         autoStartRecording = j["autoStartRecording"];
         maxRecordingDuration = j["maxRecordingDuration"];
@@ -227,9 +169,7 @@ struct AudioConfig {
             {"opusFrameLength", opusFrameLength},
             {"opusBitrate", opusBitrate},
             {"opusComplexity", opusComplexity},
-            {"enableVAD", enableVAD},
             {"enableAGC", enableAGC},
-            {"vadConfig", vadConfig.toJson()},
             {"outputFile", outputFile},
             {"autoStartRecording", autoStartRecording},
             {"maxRecordingDuration", maxRecordingDuration}

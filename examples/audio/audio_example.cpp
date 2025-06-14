@@ -6,7 +6,6 @@
  * 1. 音频设备管理：自动检测和选择输入设备
  * 2. 音频参数配置：采样率、通道数、格式等
  * 3. 编码选项：支持WAV无损和OPUS有损压缩
- * 4. VAD语音活动检测：智能检测语音片段
  * 5. 配置文件管理：保存和加载录制配置
  */
 
@@ -32,11 +31,10 @@ using namespace perfx::audio;
  * 音频帧大小(framesPerBuffer)的选择需要考虑以下因素：
  * 1. 延迟要求：较小的帧大小意味着更低的延迟
  * 2. CPU负载：较大的帧大小可以减少CPU调用频率
- * 3. 音频处理要求：需要与音频处理模块(如Opus编码器、RNNoise降噪器)的要求匹配
- * 
+ * 3. 音频处理要求：需要与音频处理模块(如Opus编码器)的要求匹配
+ *
  * 当前配置使用240帧(5ms @ 48kHz)，这是基于以下考虑：
  * - 与Opus编码器的标准帧大小(2.5ms-60ms)兼容
- * - 与RNNoise降噪器的处理要求(480采样点)匹配
  * - 提供良好的实时性能(5ms延迟)
  * - 在大多数音频设备上都能稳定工作
  */
@@ -143,21 +141,7 @@ void displayConfigSummary(const AudioConfig& inputConfig, const OutputSettings& 
         std::cout << "  - Bitrate: " << outputSettings.opusBitrate << " bps (" << (outputSettings.opusBitrate/1000) << "kbps)" << std::endl;
         std::cout << "  - Complexity: " << outputSettings.opusComplexity << std::endl;
     }
-    
-    // VAD状态
-    std::cout << "\n🎤 VAD Configuration:" << std::endl;
-    std::cout << "  - Status: " << (inputConfig.vadConfig.enabled ? "✓ Enabled" : "✗ Disabled") << std::endl;
-    if (inputConfig.vadConfig.enabled) {
-        std::cout << "  - Threshold: " << inputConfig.vadConfig.threshold << " (adjustable in JSON config)" << std::endl;
-        std::cout << "  - Silence timeout: " << inputConfig.vadConfig.silenceTimeoutMs << "ms (adjustable in JSON config)" << std::endl;
-        std::cout << "  - Advanced features: " 
-                  << (inputConfig.vadConfig.enableSilenceFrame ? "SilenceFrame " : "")
-                  << (inputConfig.vadConfig.enableSentenceDetection ? "SentenceDetection " : "")
-                  << (inputConfig.vadConfig.enableIdleDetection ? "IdleDetection" : "") << std::endl;
-    } else {
-        std::cout << "  - Note: All VAD features are disabled for continuous recording" << std::endl;
-    }
-    
+        
     // 输出信息
     std::cout << "\n💾 Output Configuration:" << std::endl;
     std::cout << "  - File: " << outputSettings.outputFile << std::endl;
@@ -233,105 +217,6 @@ int selectDevice(const std::vector<DeviceInfo>& devices) {
     return selectedIndex;
 }
 
-/**
- * @brief 配置VAD参数
- * @param vadConfig VAD配置（输出参数）
- * 
- * 通过用户交互配置VAD（语音活动检测）参数，包括启用状态、阈值和超时时间
- */
-void configureVADParameters(VADConfig& vadConfig) {
-    std::cout << "\n=== 配置VAD参数 ===" << std::endl;
-    
-    // 配置VAD启用状态
-    std::cout << "是否启用VAD (语音活动检测)?" << std::endl;
-    std::cout << "1. 启用 (推荐)" << std::endl;
-    std::cout << "2. 禁用 (连续录制)" << std::endl;
-    
-    int choice;
-    do {
-        std::cout << "请选择 (1-2): ";
-        std::cin >> choice;
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    } while (choice < 1 || choice > 2);
-    
-    vadConfig.enabled = (choice == 1);
-    
-    if (vadConfig.enabled) {
-        // 配置VAD阈值
-        std::cout << "\n配置VAD阈值 (0.0-1.0):" << std::endl;
-        std::cout << "推荐值: 0.5" << std::endl;
-        
-        do {
-            std::cout << "请输入阈值: ";
-            std::cin >> vadConfig.threshold;
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        } while (vadConfig.threshold < 0.0f || vadConfig.threshold > 1.0f);
-        
-        // 配置静音超时
-        std::cout << "\n配置静音超时时间 (毫秒):" << std::endl;
-        std::cout << "推荐值: 1000" << std::endl;
-        
-        do {
-            std::cout << "请输入超时时间: ";
-            std::cin >> vadConfig.silenceTimeoutMs;
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        } while (vadConfig.silenceTimeoutMs < 100 || vadConfig.silenceTimeoutMs > 5000);
-        
-        // 配置句子超时
-        std::cout << "\n配置句子超时时间 (毫秒):" << std::endl;
-        std::cout << "推荐值: 500" << std::endl;
-        
-        do {
-            std::cout << "请输入超时时间: ";
-            std::cin >> vadConfig.sentenceTimeoutMs;
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        } while (vadConfig.sentenceTimeoutMs < 100 || vadConfig.sentenceTimeoutMs > 2000);
-        
-        // 配置高级功能
-        std::cout << "\n配置高级功能:" << std::endl;
-        std::cout << "1. 启用静音帧检测" << std::endl;
-        std::cout << "2. 启用句子检测" << std::endl;
-        std::cout << "3. 启用空闲检测" << std::endl;
-        std::cout << "4. 全部启用" << std::endl;
-        std::cout << "5. 全部禁用" << std::endl;
-        
-        do {
-            std::cout << "请选择 (1-5): ";
-            std::cin >> choice;
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        } while (choice < 1 || choice > 5);
-        
-        switch (choice) {
-            case 1:
-                vadConfig.enableSilenceFrame = true;
-                vadConfig.enableSentenceDetection = false;
-                vadConfig.enableIdleDetection = false;
-                break;
-            case 2:
-                vadConfig.enableSilenceFrame = false;
-                vadConfig.enableSentenceDetection = true;
-                vadConfig.enableIdleDetection = false;
-                break;
-            case 3:
-                vadConfig.enableSilenceFrame = false;
-                vadConfig.enableSentenceDetection = false;
-                vadConfig.enableIdleDetection = true;
-                break;
-            case 4:
-                vadConfig.enableSilenceFrame = true;
-                vadConfig.enableSentenceDetection = true;
-                vadConfig.enableIdleDetection = true;
-                break;
-            case 5:
-                vadConfig.enableSilenceFrame = false;
-                vadConfig.enableSentenceDetection = false;
-                vadConfig.enableIdleDetection = false;
-                break;
-        }
-    }
-    
-    std::cout << "\n✓ VAD参数配置完成" << std::endl;
-}
 
 // =============================================================================
 // 1. 输入部分的设定 (Input Configuration Functions)
@@ -350,41 +235,6 @@ void printSampleRates() {
 // Note: Sample rate selection functions removed as we now use fixed 48K sample rate
 // The system will automatically handle resampling if device doesn't support 48K
 
-// Helper function to get default VAD configuration
-VADConfig getDefaultVADConfig() {
-    VADConfig vadConfig;
-    vadConfig.enabled = false;
-    vadConfig.threshold = 0.3f;              // 默认检测阈值 (0.0-1.0)
-    vadConfig.silenceTimeoutMs = 1500;       // 默认静音超时 1.5秒
-    vadConfig.sentenceTimeoutMs = 800;       // 默认句子间隔 0.8秒
-    vadConfig.enableSilenceFrame = true;     // 默认启用静音帧检测
-    vadConfig.enableSentenceDetection = true; // 默认启用句子检测
-    vadConfig.enableIdleDetection = true;    // 默认启用空闲检测
-    return vadConfig;
-}
-
-// Helper function to get VAD choice from user (simple on/off)
-bool getVADChoice() {
-    std::cout << "\n=== Voice Activity Detection (VAD) ===" << std::endl;
-    std::cout << "Enable VAD (automatic silence detection)?" << std::endl;
-    std::cout << "- ON: Automatically detect and handle silence periods" << std::endl;
-    std::cout << "- OFF: Record continuously without silence detection" << std::endl;
-    std::cout << "Note: Detailed VAD parameters are configured in the JSON config file" << std::endl;
-    
-    char choice;
-    std::cout << "Enable VAD? (y/n): ";
-    std::cin >> choice;
-    
-    bool vadEnabled = (choice == 'y' || choice == 'Y');
-    std::cout << "VAD: " << (vadEnabled ? "✓ Enabled" : "✗ Disabled") << std::endl;
-    
-    if (vadEnabled) {
-        std::cout << "VAD will use default parameters from configuration file." << std::endl;
-        std::cout << "You can modify detailed VAD settings in audio_config.json after recording." << std::endl;
-    }
-    
-    return vadEnabled;
-}
 
 // Helper function to configure input settings
 AudioConfig configureInputSettings(const std::vector<DeviceInfo>& devices) {
@@ -443,18 +293,12 @@ AudioConfig configureInputSettings(const std::vector<DeviceInfo>& devices) {
     config.opusComplexity = 6;    // 中等复杂度
     config.inputDevice = selectedDevice;  // 设置选择的设备
 
-    // 配置VAD - 简化用户选择为开关，详细参数使用默认值
-    bool vadEnabled = getVADChoice();
-    config.enableVAD = vadEnabled;
-    config.vadConfig = getDefaultVADConfig();
-    config.vadConfig.enabled = vadEnabled;  // 设置用户选择的开关状态
 
     std::cout << "\n配置摘要:" << std::endl;
     std::cout << "输入设备: " << selectedDevice.name << std::endl;
     std::cout << "采样率: 48000 Hz (默认)" << std::endl;
     std::cout << "通道数: " << (config.channels == ChannelCount::MONO ? "单声道" : "立体声") << std::endl;
     std::cout << "输出格式: " << (config.encodingFormat == EncodingFormat::WAV ? "WAV" : "OPUS") << std::endl;
-    std::cout << "VAD状态: " << (config.vadConfig.enabled ? "开启" : "关闭") << std::endl;
 
     return config;
 }
@@ -758,11 +602,6 @@ int main() {
             inputConfig.opusBitrate = 32000;   // 32kbps比特率
             inputConfig.opusComplexity = 6;    // 中等复杂度
             
-            // 配置VAD - 简化用户选择为开关，详细参数使用默认值
-            bool vadEnabled = getVADChoice();
-            inputConfig.enableVAD = vadEnabled;
-            inputConfig.vadConfig = getDefaultVADConfig();
-            inputConfig.vadConfig.enabled = vadEnabled;  // 设置用户选择的开关状态
             
             // 配置输出设置
             outputSettings = configureOutputSettings(inputConfig);

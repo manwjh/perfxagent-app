@@ -1,3 +1,6 @@
+cmake_policy(SET CMP0144 NEW)
+cmake_policy(SET CMP0167 NEW)
+
 cmake_minimum_required(VERSION 3.16)
 
 project(perfxagent-app VERSION 0.1.0 LANGUAGES CXX C)
@@ -22,7 +25,7 @@ endif()
 
 # 设置版本号
 set(PERFXAGENT_VERSION_MAJOR 1)
-set(PERFXAGENT_VERSION_MINOR 0)
+set(PERFXAGENT_VERSION_MINOR 1)
 set(PERFXAGENT_VERSION_PATCH 0)
 set(PERFXAGENT_VERSION "${PERFXAGENT_VERSION_MAJOR}.${PERFXAGENT_VERSION_MINOR}.${PERFXAGENT_VERSION_PATCH}")
 
@@ -123,7 +126,6 @@ find_package(Qt6 6.4.0 COMPONENTS
     Widgets
     Network
     WebEngineWidgets
-    WebSockets
     Multimedia
     REQUIRED
 )
@@ -137,40 +139,7 @@ find_package(nlohmann_json 3.11.3 REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(OpenCV REQUIRED)
 
-# RNNoise
-set(RNNOISE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rnnoise)
-set(RNNOISE_SOURCES
-    ${RNNOISE_ROOT}/src/denoise.c
-    ${RNNOISE_ROOT}/src/rnnoise_data.c
-    ${RNNOISE_ROOT}/src/kiss_fft.c
-    ${RNNOISE_ROOT}/src/pitch.c
-    ${RNNOISE_ROOT}/src/rnn.c
-    ${RNNOISE_ROOT}/src/nnet.c
-    ${RNNOISE_ROOT}/src/nnet_default.c
-    ${RNNOISE_ROOT}/src/celt_lpc.c
-    ${RNNOISE_ROOT}/src/rnnoise_tables.c
-    ${RNNOISE_ROOT}/src/parse_lpcnet_weights.c
-)
-include_directories(
-    ${RNNOISE_ROOT}/include
-    ${RNNOISE_ROOT}/src
-)
-add_definitions(-DHAVE_CONFIG_H)
-
-# RNNoise compilation options
-add_definitions(-DHAVE_CONFIG_H)
-
-# Include RNNoise headers and source files
-include_directories(
-    ${RNNOISE_ROOT}/src
-)
-
-# Set compilation flags for Apple platforms
-if(APPLE)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native")
-endif()
-
+# FFMPEG 配置
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavcodec
     libavformat
@@ -184,8 +153,6 @@ set(GTEST_INCLUDE_DIR ${GTEST_ROOT}/include)
 set(GTEST_LIBRARY ${GTEST_ROOT}/lib/libgtest.a)
 set(GTEST_MAIN_LIBRARY ${GTEST_ROOT}/lib/libgtest_main.a)
 include_directories(${GTEST_INCLUDE_DIR})
-# 只链接一次 GTest 库
-link_libraries(${GTEST_LIBRARY})
 
 # Boost 配置
 set(Boost_USE_STATIC_LIBS OFF)
@@ -213,27 +180,16 @@ find_package(OpenSSL 3.0.0 REQUIRED)
 set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
-    src/ui/agent_zoo.cpp
-    src/ui/device_settings.cpp
-    src/ui/hello_window.cpp
     src/audio/audio_device.cpp
-    src/connection/thread_pool.cpp
-    src/connection/connection_manager.cpp
     src/audio/audio_manager.cpp
     src/camera/camera_device.cpp
     src/camera/camera_manager.cpp
-    ${RNNOISE_SOURCES}
 )
 
 # 添加头文件
 set(HEADERS
     include/ui/main_window.h
-    include/ui/agent_zoo.h
-    include/ui/device_settings.h
-    include/ui/hello_window.h
     include/audio/audio_device.h
-    include/connection/thread_pool.h
-    include/connection/connection_manager.h
     include/audio/audio_manager.h
     include/camera/camera_device.h
     include/camera/camera_manager.h
@@ -247,7 +203,6 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/include/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/include/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/connection
     ${CMAKE_CURRENT_SOURCE_DIR}/include/camera
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
@@ -284,198 +239,74 @@ set(AUDIO_HEADERS
     include/audio/audio_manager.h
 )
 
-# 创建音频库
-add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS} ${RNNOISE_SOURCES})
-
-# 设置音频库包含目录
-target_include_directories(perfx_audio PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${PortAudio_INCLUDE_DIRS}
-    ${PORTAUDIO_PREFIX}/include
-    ${SndFile_INCLUDE_DIRS}
-    ${OPUS_INCLUDE_DIRS}
-    ${OGG_INCLUDE_DIRS}
-    ${SAMPLERATE_INCLUDE_DIRS}
-    ${RNNOISE_ROOT}/include
-    ${RNNOISE_ROOT}/src
-)
-
-# 链接音频库依赖
+# 添加音频库
+add_library(perfx_audio STATIC ${AUDIO_SOURCES} ${AUDIO_HEADERS})
 target_link_libraries(perfx_audio
+    PRIVATE
     ${PortAudio_LIBRARIES}
     ${Opus_LIBRARIES}
-    ${Ogg_LIBRARIES}
     ${SndFile_LIBRARIES}
     ${SAMPLERATE_LIBRARIES}
-    PkgConfig::FFMPEG
 )
 
-# 设置编译选项
-target_compile_features(perfx_audio PUBLIC cxx_std_17)
-if(MSVC)
-    target_compile_options(perfx_audio PRIVATE /W4 /WX)
-else()
-    target_compile_options(perfx_audio PRIVATE -Wall -Wextra -Wpedantic -Werror)
+# 确保 FFmpeg 库路径正确
+if(APPLE)
+    set(FFMPEG_LIBRARY_DIR "/opt/homebrew/lib")
+    link_directories(${FFMPEG_LIBRARY_DIR})
 endif()
 
-# 添加连接库源文件
-set(CONNECTION_SOURCES
-    src/connection/thread_pool.cpp
-    src/connection/connection_manager.cpp
-)
-
-# 添加连接库头文件
-set(CONNECTION_HEADERS
-    include/connection/thread_pool.h
-    include/connection/connection_manager.h
-)
-
-# 创建连接库
-add_library(perfx_connection STATIC ${CONNECTION_SOURCES} ${CONNECTION_HEADERS})
-
-# 设置连接库包含目录
-target_include_directories(perfx_connection PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${Boost_INCLUDE_DIRS}
-    ${OPENSSL_INCLUDE_DIR}
-)
-
-# 链接连接库依赖
-target_link_libraries(perfx_connection PUBLIC
-    ${Boost_LIBRARIES}
-    ${OPENSSL_LIBRARIES}
-    Threads::Threads
-    nlohmann_json::nlohmann_json
-)
-
-# 设置编译选项
-target_compile_features(perfx_connection PUBLIC cxx_std_17)
-if(MSVC)
-    target_compile_options(perfx_connection PRIVATE /W4 /WX)
-else()
-    target_compile_options(perfx_connection PRIVATE -Wall -Wextra -Wpedantic -Werror)
+# 确保 Ogg 库路径正确
+if(APPLE)
+    set(OGG_LIBRARY_DIR "/opt/homebrew/lib")
+    link_directories(${OGG_LIBRARY_DIR})
 endif()
 
-# 创建可执行文件
-add_executable(perfxagent-app ${SOURCES} ${HEADERS} ${RNNOISE_SOURCES})
-
-# 添加examples目录
-add_subdirectory(examples)
-
-# 设置可执行文件的包含目录
-target_include_directories(perfxagent-app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${PortAudio_INCLUDE_DIRS}
-    ${Opus_INCLUDE_DIRS}
-    ${Ogg_INCLUDE_DIRS}
-    ${SndFile_INCLUDE_DIRS}
-    ${SAMPLERATE_INCLUDE_DIRS}
-    ${nlohmann_json_INCLUDE_DIRS}
-)
-
-# 链接库
-target_link_libraries(perfxagent-app PRIVATE
+# 添加主可执行文件
+add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+    perfx_audio
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
     Qt6::WebEngineWidgets
-    Qt6::WebSockets
     Qt6::Multimedia
-    ${PortAudio_LIBRARIES}
-    ${Opus_LIBRARIES}
-    ${Ogg_LIBRARIES}
-    ${SndFile_LIBRARIES}
-    ${SAMPLERATE_LIBRARIES}
     OpenSSL::SSL
     OpenSSL::Crypto
-    nlohmann_json::nlohmann_json
     Boost::system
     Boost::thread
-    perfx_audio
-    perfx_connection
     ${OpenCV_LIBS}
+    ${GTEST_LIBRARY}
+    ${FFMPEG_LIBRARIES}
+    ogg  # 确保 Ogg 库正确链接
 )
 
-# 复制 Qt DLL 到输出目录（仅 Windows）
-if(WIN32)
-    add_custom_command(TARGET perfxagent-app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:Qt6::Core>
-            $<TARGET_FILE:Qt6::Gui>
-            $<TARGET_FILE:Qt6::Widgets>
-            $<TARGET_FILE:Qt6::Network>
-            $<TARGET_FILE:Qt6::WebEngineWidgets>
-            $<TARGET_FILE:Qt6::WebSockets>
-            $<TARGET_FILE_DIR:perfxagent-app>
-    )
-endif()
+# 添加 examples 子目录
+add_subdirectory(examples)
 
-install(TARGETS perfxagent-app
+# 安装目标
+install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
 
-# 设置包含目录
-target_include_directories(perfxagent-app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${PortAudio_INCLUDE_DIRS}
-    ${Opus_INCLUDE_DIRS}
-    ${Ogg_INCLUDE_DIRS}
-    ${SndFile_INCLUDE_DIRS}
-    ${SAMPLERATE_INCLUDE_DIRS}
-    ${nlohmann_json_INCLUDE_DIRS}
-    ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Gui_INCLUDE_DIRS}
-    ${Qt6Widgets_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
-    ${Qt6WebEngineWidgets_INCLUDE_DIRS}
-    ${Qt6WebSockets_INCLUDE_DIRS}
-    ${Qt6Multimedia_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-    ${OPENSSL_INCLUDE_DIR}
-    ${Boost_INCLUDE_DIRS}
-    ${BOOST_INCLUDEDIR}
-    /opt/homebrew/include
-    /opt/homebrew/opt/boost/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/audio
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/connection
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/camera
+# 安装资源文件
+install(DIRECTORY resources/
+    DESTINATION share/${PROJECT_NAME}/resources
+    FILES_MATCHING PATTERN "*.png"
+    PATTERN "*.jpg"
+    PATTERN "*.svg"
+    PATTERN "*.qss"
 )
 
-# 设置输出目录
-set_target_properties(perfxagent-app PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+# 安装配置文件
+install(FILES config.json
+    DESTINATION share/${PROJECT_NAME}
 )
 
-# 安装规则
-install(TARGETS perfx_audio
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-)
-
-install(DIRECTORY include/
-    DESTINATION include
-    FILES_MATCHING PATTERN "*.h"
-)
-
-include_directories(${CMAKE_SOURCE_DIR}/include)
-include_directories(${CMAKE_SOURCE_DIR}/include/audio)
-
-# 添加测试
-enable_testing()
-# add_subdirectory(tests/audio)
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${PortAudio_INCLUDE_DIRS})
-include_directories(${Opus_INCLUDE_DIRS})
-include_directories(${SAMPLERATE_INCLUDE_DIRS})
-include_directories(${nlohmann_json_INCLUDE_DIRS}) 
+# 安装文档
+install(FILES README.md LICENSE
+    DESTINATION share/${PROJECT_NAME}/doc
+) 

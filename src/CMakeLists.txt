@@ -23,9 +23,6 @@ target_link_libraries(perfx_audio PUBLIC
 add_executable(perfxagent-app
     main.cpp
     ui/main_window.cpp
-    ui/agent_zoo.cpp
-    ui/device_settings.cpp
-    ui/hello_window.cpp
     audio/audio_device.cpp
     core/config_manager.cpp
     connection/thread_pool.cpp

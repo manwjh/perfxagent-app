@@ -127,18 +127,6 @@ public:
             processor_->setOpusFrameLength(config.opusFrameLength);
         }
 
-        // 8. 确保VAD配置正确传递
-        if (config.enableVAD) {
-            VADConfig vadConfig;
-            vadConfig.enabled = true;
-            vadConfig.threshold = 0.5f;  // 默认阈值
-            vadConfig.enableIdleDetection = true;
-            vadConfig.enableSentenceDetection = true;
-            vadConfig.silenceTimeoutMs = 1000;  // 1秒无声音进入空闲状态
-            vadConfig.sentenceTimeoutMs = 500;  // 0.5秒无声音判定句子结束
-            processor_->updateVADConfig(vadConfig);
-            std::cout << "[DEBUG] VAD configuration updated" << std::endl;
-        }
 
         // 9. 初始化音频线程
         audioStreamThread_ = std::make_shared<AudioThread>();
@@ -784,9 +772,6 @@ public:
         return true;
     }
 
-    const VADStatus& getVADStatus() const {
-        return processor_->getVADStatus();
-    }
 
 private:
     bool initialized_;
@@ -1012,9 +997,7 @@ private:
             return;
         }
 
-        if (isRecording_) {
-            // VAD处理已关闭，跳过VAD相关逻辑
-            
+        if (isRecording_) {            
             // 将数据添加到录音缓冲区
             size_t samplesPerFrame = static_cast<int>(config_.channels);
             size_t totalSamples = frameCount * samplesPerFrame;
@@ -1193,20 +1176,6 @@ private:
         }
     }
 
-    std::string getVADStateString(VADState state) {
-        switch (state) {
-            case VADState::IDLE:
-                return "IDLE";
-            case VADState::SILENCE:
-                return "SILENCE";
-            case VADState::SPEAKING:
-                return "SPEAKING";
-            case VADState::SENTENCE_END:
-                return "SENTENCE_END";
-            default:
-                return "UNKNOWN";
-        }
-    }
 };
 
 // AudioManager构造函数和析构函数
@@ -1245,9 +1214,6 @@ bool AudioManager::stopRecording() {
     return impl_->stopRecording();
 }
 
-const VADStatus& AudioManager::getVADStatus() const {
-    return impl_->getVADStatus();
-}
 
 bool AudioManager::loadAudioConfig(AudioConfig& inputConfig, OutputSettings& outputSettings, const std::string& configPath) {
     try {
@@ -1351,17 +1317,6 @@ bool AudioManager::loadAudioConfig(AudioConfig& inputConfig, OutputSettings& out
             outputSettings.outputFile = output["outputFile"];
         }
         
-        // 加载VAD配置
-        if (config.contains("vad")) {
-            auto& vad = config["vad"];
-            inputConfig.vadConfig.enabled = vad["enabled"];
-            inputConfig.vadConfig.threshold = vad["threshold"];
-            inputConfig.vadConfig.silenceTimeoutMs = vad["silenceTimeoutMs"];
-            inputConfig.vadConfig.sentenceTimeoutMs = vad["sentenceTimeoutMs"];
-            inputConfig.vadConfig.enableSilenceFrame = vad["enableSilenceFrame"];
-            inputConfig.vadConfig.enableSentenceDetection = vad["enableSentenceDetection"];
-            inputConfig.vadConfig.enableIdleDetection = vad["enableIdleDetection"];
-        }
         
         std::cout << "✓ Configuration loaded from: " << configPath << std::endl;
         
@@ -1455,24 +1410,6 @@ bool AudioManager::saveAudioConfig(const AudioConfig& inputConfig, const OutputS
         config["output"]["outputFile_description"] = "输出文件路径: 录音保存的完整文件路径";
         config["output"]["resampling_note"] = "重采样处理: 系统会自动处理模块间采样率转换 (如rnnoise需要48K，OPUS支持多种采样率)";
         
-        // VAD配置 (Voice Activity Detection)
-        config["vad"]["enabled"] = inputConfig.vadConfig.enabled;
-        config["vad"]["enabled_description"] = "语音活动检测总开关: true=启用VAD, false=禁用VAD (用户只需配置此项)";
-        
-        config["vad"]["threshold"] = inputConfig.vadConfig.threshold;
-        config["vad"]["threshold_description"] = "检测阈值: 0.0-1.0, 越低越敏感 (默认0.3, 建议范围0.2-0.5)";
-        
-        config["vad"]["silenceTimeoutMs"] = inputConfig.vadConfig.silenceTimeoutMs;
-        config["vad"]["silenceTimeoutMs_description"] = "静音超时(ms): 超过此时间的连续静音将触发检测 (默认1500ms)";
-        
-        config["vad"]["sentenceTimeoutMs"] = inputConfig.vadConfig.sentenceTimeoutMs;
-        config["vad"]["sentenceTimeoutMs_description"] = "句子间隔超时(ms): 句子之间的间隔检测时间 (默认800ms)";
-        
-        config["vad"]["enableSilenceFrame"] = inputConfig.vadConfig.enableSilenceFrame;
-        config["vad"]["enableSentenceDetection"] = inputConfig.vadConfig.enableSentenceDetection;
-        config["vad"]["enableIdleDetection"] = inputConfig.vadConfig.enableIdleDetection;
-        config["vad"]["features_description"] = "VAD详细功能开关: 静音帧检测/句子检测/空闲检测 (默认全部开启)";
-        config["vad"]["note"] = "注意: 用户只需通过程序选择VAD开/关，详细参数可在此JSON文件中调整";
         
         // 元数据 (Metadata)
         config["metadata"]["version"] = "1.2";

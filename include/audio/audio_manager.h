@@ -107,7 +107,6 @@ public:
     // 获取最后一次错误信息
     std::string getLastError() const { return lastError_; }
 
-    const VADStatus& getVADStatus() const;
 
     // 从JSON文件加载音频配置
     bool loadAudioConfig(AudioConfig& inputConfig, OutputSettings& outputSettings, const std::string& configPath);

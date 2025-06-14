@@ -707,7 +707,7 @@ RNNoise 只支持 48kHz 采样率，这是它的固定设计。如果你的音�
 	4.	降噪后的数据还是 float 类型，你需要再把它乘以 32768.0，转换回 int16_t 类型的 PCM 数据。
 
 
-【2025/6/8 10:35】
+###【2025/6/8 10:35】
 在调试opus编码时，缓冲问题的bug。ai出现了“960不是240的整数倍！”
 ai>
 缓冲区大小不匹配：
@@ -721,7 +721,314 @@ Opus 帧大小：960 采样点（20ms @ 48kHz）
 数据格式不正确
 缓冲区大小不是帧大小的整数倍
 
+### 【2025/6/14 15:54】
+我已经被这个屎山代码，搞烦了。我已经被这个庞大的规划，搞烦了。
+去繁从简，删代码，读代码。才能继续前进。
+连UI都删掉，只留下空空的界面。
+
+如果你事事让AI帮你去干，¥¥¥消耗得会很快。
+自己手动搜索，删除代码，效率更高。反正房子也不是我自己修得，拆得过程还是挺爽的。
+
+完成清理，应该是最简状态了。
+wangjunhui@MacBook-Pro-5 bin % ls -lT
+total 8488
+-rw-r--r--@ 1 wangjunhui  staff     2514  6 14 16:23:51 2025 audio_config.json
+-rwxr-xr-x@ 1 wangjunhui  staff  1728832  6 14 16:18:16 2025 audio_example
+-rwxr-xr-x@ 1 wangjunhui  staff   474560  6 14 16:18:18 2025 camera_example
+-rwxr-xr-x@ 1 wangjunhui  staff    96128  6 14 16:13:56 2025 pa_record_example
+-rwxr-xr-x@ 1 wangjunhui  staff  2033456  6 14 16:17:53 2025 perfxagent-app
+
+wangjunhui@MacBook-Pro-5 build % cmake ..
+CMake Warning (dev) at CMakeLists.txt:164 (find_package):
+  Policy CMP0144 is not set: find_package uses upper-case <PACKAGENAME>_ROOT
+  variables.  Run "cmake --help-policy CMP0144" for policy details.  Use the
+  cmake_policy command to set the policy and suppress this warning.
+
+  CMake variable BOOST_ROOT is set to:
+
+    /opt/homebrew/opt/boost
+
+  For compatibility, find_package is ignoring the variable, but code in a
+  .cmake module might still use it.
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at CMakeLists.txt:164 (find_package):
+  Policy CMP0167 is not set: The FindBoost module is removed.  Run "cmake
+  --help-policy CMP0167" for policy details.  Use the cmake_policy command to
+  set the policy and suppress this warning.
+
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Configuring done (0.8s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/wangjunhui/playcode/perfxagent-app/build
+wangjunhui@MacBook-Pro-5 build % make -j4
+[  0%] Built target perfx_camera_autogen_timestamp_deps
+[  0%] Built target pa_record_example_autogen_timestamp_deps
+[  0%] Built target perfx_audio_autogen_timestamp_deps
+[  5%] Built target pa_record_example_autogen
+[  5%] Built target perfx_camera_autogen
+[  7%] Built target perfx_audio_autogen
+[ 23%] Built target perfx_camera
+[ 30%] Built target pa_record_example
+[ 30%] Built target camera_example_autogen_timestamp_deps
+[ 33%] Built target camera_example_autogen
+[ 51%] Built target perfx_audio
+[ 51%] Built target perfxagent-app_autogen_timestamp_deps
+[ 51%] Built target audio_example_autogen_timestamp_deps
+[ 61%] Built target camera_example
+[ 64%] Built target audio_example_autogen
+[ 66%] Built target perfxagent-app_autogen
+[ 76%] Built target audio_example
+[100%] Built target perfxagent-app
+wangjunhui@MacBook-Pro-5 build % ./bin/audio_example 
+🎙️  PerfX Audio Recording Tool
+================================
+
+📁 Found existing audio configuration file!
+Do you want to:
+1. Use existing configuration (quick start)
+2. Enter interactive configuration
+Enter your choice (1-2): 2
+
+🔧 Entering interactive configuration...
+[AUDIO] 
+=== Input Device Configuration ===
+[AUDIO] Available input devices:
+[AUDIO] 0. “王军辉的iPhone”的麦克风 (channels: 1, sample rate: 48000Hz)
+[AUDIO] 1. MacBook Pro麦克风 (channels: 1, sample rate: 48000Hz)
+[AUDIO] 2. TFFAudio (channels: 6, sample rate: 48000Hz)
+
+请选择输入设备 (0-2): 1
+
+=== Output Configuration ===
+Select encoding format:
+1. WAV (uncompressed)
+2. OPUS (compressed)
+Enter your choice (1-2): 1
+
+=== Output Configuration Summary ===
+- Output Format: WAV (uncompressed)
+- Sample Rate: 48000 Hz (fixed default)
+- Resampling: Auto-handled by system when needed
+- Output File: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+
+💾 Saving configuration...
+✓ Configuration saved to: /Users/wangjunhui/playcode/perfxagent-app/build/bin/audio_config.json
+✓ Configuration has been saved for future use.
+
+=== Current Configuration Summary ===
+📱 Device Information:
+  - Name: MacBook Pro麦克风
+  - Index: 2
+  - Channels: 1
+
+🎵 Audio Parameters:
+  - Sample Rate: 48000 Hz (default)
+  - Channels: Mono
+  - Format: Int16
+  - Frames per buffer: 240
+
+🔧 Encoding Parameters:
+  - Format: WAV
+
+💾 Output Configuration:
+  - File: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+  - Resampling: Auto (handled by system when needed)
+
+[DEBUG] Entering AudioManager::initialize
+[INFO] Device supports requested format: 8
+[DEBUG] Opening audio stream with device: MacBook Pro麦克风
+[DEBUG] Stream parameters:
+  - Device index: 2
+  - Channels: 1
+  - Sample format: 8
+  - Sample rate: 48000
+  - Frames per buffer: 240
+[DEBUG] AudioProcessor::initialize: Opus frame size = 960 samples (20ms @ 48000Hz)
+[AUDIO] Opus encoder initialized
+[DEBUG] AudioProcessor::initialize config:
+  - sampleRate: 48000
+  - channels: 1
+  - format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Opus frame size: 960 samples
+- opusFrameLength:20
+- sampleRate:48000
+[DEBUG] Buffer size (240) is compatible with Opus frame size (960)
+[DEBUG] AudioThread::initialize received config from AudioProcessor:
+  - sampleRate: 48000
+  - channels: 1
+  - format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Exiting AudioManager::initialize, result: success
+
+开始录音...
+[AUDIO] Setting encoding format to WAV
+[AUDIO] Starting audio stream...
+[DEBUG] ~AudioThread called
+[DEBUG] ~AudioThread::Impl called
+[DEBUG] AudioThread::stop() called
+[DEBUG] ~AudioThread::Impl completed
+[DEBUG] AudioThread::initialize received config from AudioProcessor:
+  - sampleRate: 48000
+  - channels: 1
+  - format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] AudioThread processor set: 0x146e289e0
+[DEBUG] AudioManager set processor to AudioThread: 0x146e289e0
+[DEBUG] AudioThread::setInputDevice called with current config:
+  - sampleRate: 48000
+  - channels: 1
+  - format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Using INT16 format for input
+[DEBUG] Device default latency (0.0328542s) too low, using safe minimum: 0.1s
+[DEBUG] Device parameters set: index=2, channels=1, format=8, latency=0.1
+[DEBUG] Starting audio thread...
+[DEBUG] Input device: index=2, channels=1, sampleRate=48000
+[DEBUG] Input device info: MacBook Pro麦克风
+[DEBUG] Opening audio stream with device index: 2
+[DEBUG] Starting audio stream...
+[DEBUG] Audio thread started successfully
+[DEBUG] Waiting for audio stream to stabilize...
+[DEBUG] Audio stream stabilization complete
+AudioThread::startRecording called
+[AUDIO] Starting recording to file: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+✓ 录音已开始，按Enter键停止...
+[DEBUG] Recording: frame 100, config_format=0, samples=240
+[DEBUG] Raw data check: 18 00 25 00 48 00 50 00 
+[DEBUG] As INT16: 24 37
+[DEBUG] As FLOAT32: 3.39795e-39 7.34694e-39
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 0
+  - hasReasonableFloatValues: 0
+  - maxAbs: 7.34694e-39
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[audioCallback] Processing INT16 input data, frameCount=240, total callbacks=211[DEBUG] Recording: frame 200, config_format=0, samples=240
+[DEBUG] Raw data check: 34 00 29 00 0F 00 E8 FF 
+[DEBUG] As INT16: 52 41
+[DEBUG] As FLOAT32: 3.76533e-39 nan
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 0
+  - hasReasonableFloatValues: 0
+  - maxAbs: 3.76533e-39
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[DEBUG] Recording: frame 300, config_format=0, samples=240
+[DEBUG] Raw data check: F9 00 E2 00 D0 00 C1 00 
+[DEBUG] As INT16: 249 226
+[DEBUG] As FLOAT32: 2.07552e-38 1.77245e-38
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 0
+  - hasReasonableFloatValues: 0
+  - maxAbs: 2.07552e-38
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[audioCallback] Processing INT16 input data, frameCount=240, total callbacks=210[DEBUG] Recording: frame 400, config_format=0, samples=240
+[DEBUG] Raw data check: 5E 00 59 00 53 00 4E 00 
+[DEBUG] As INT16: 94 89
+[DEBUG] As FLOAT32: 8.17349e-39 7.16329e-39
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 1
+  - hasReasonableFloatValues: 0
+  - maxAbs: 8.44899e-39
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[DEBUG] Recording: frame 500, config_format=0, samples=240
+[DEBUG] Raw data check: 23 00 24 00 2F 00 2D 00 
+[DEBUG] As INT16: 35 36
+[DEBUG] As FLOAT32: 3.30613e-39 4.13266e-39
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 0
+  - hasReasonableFloatValues: 0
+  - maxAbs: 1.25816e-38
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[DEBUG] Recording: frame 600, config_format=0, samples=240
+[DEBUG] Raw data check: 0C 00 13 00 19 00 1D 00 
+[DEBUG] As INT16: 12 19
+[DEBUG] As FLOAT32: 1.74489e-39 2.66326e-39
+[DEBUG] Device config format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Format analysis:
+  - deviceReportsFloat32: 0
+  - validFloatRange: 1
+  - hasReasonableFloatValues: 0
+  - maxAbs: 7.89796e-39
+  - hasLargeInt16Values: 0
+  - DECISION: treatAsFloat32 = 0
+[DEBUG] Processed as INT16 data
+[audioCallback] Processing INT16 input data, frameCount=240, total callbacks=210
+
+正在停止录音...
+[AUDIO] Stopping audio stream...
+[DEBUG] AudioThread::stop() called
+[DEBUG] Stopping recording thread...
+[DEBUG] Recording thread stopped
+[DEBUG] Stopping PortAudio stream...
+[DEBUG] PortAudio stream stopped
+[DEBUG] AudioThread::stop() completed
+[AUDIO] Saving recording data to file: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+[DEBUG] Recording buffer analysis:
+  - Buffer size: 164640 samples
+  - Channels: 1
+  - Frame count: 164640
+  - First 8 samples: 17 22 26 30 32 37 41 46 
+  - Non-zero samples: 163117 / 164640
+  - Sample range: -1689 to 2294
+[DEBUG] WAV File Write Parameters:
+  - Input frames: 164640
+  - Channels: 1
+  - Bytes per sample: 2
+  - Calculated data size: 329280 bytes
+  - Expected duration: 3.43 seconds
+[DEBUG] WAV Header Generated:
+  - Format: 1 (1 = PCM)
+  - Channels: 1
+  - Sample Rate: 48000 Hz
+  - Bits Per Sample: 16 bits (buffer format)
+  - Byte Rate: 96000 bytes/sec
+  - Block Align: 2 bytes
+  - Data Size: 329280 bytes
+  - Expected duration: 3.43 seconds
+  - Input device format: 0 (INT16=0, FLOAT32=3)
+[DEBUG] Writing first 8 bytes to WAV: 11 00 16 00 1A 00 1E 00 
+[DEBUG] First few samples: 17 22 26 30 
+[DEBUG] Successfully wrote 329280 bytes of audio data
+[AUDIO] Recording stopped, file saved: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+
+=== Recording Results ===
+  - File: /Users/wangjunhui/playcode/perfxagent-app/build/recordings/recording_48000hz_mono.wav
+  - Size: 329324 bytes
+  - Status: ✓ Successfully recorded
+[DEBUG] ~AudioManager::Impl called
+[DEBUG] ~AudioThread called
+[DEBUG] ~AudioThread::Impl called
+[DEBUG] AudioThread::stop() called
+[DEBUG] ~AudioThread::Impl completed
+[DEBUG] ~AudioDevice called
+[DEBUG] ~AudioDevice::Impl called
+[DEBUG] Closing audio stream...
+wangjunhui@MacBook-Pro-5 build % ./bin/perfxagent-app 
+wangjunhui@MacBook-Pro-5 build % 
 
 
+### 【2025/6/14 16:30】
+HISTORY(1) 本季到此结束，因为实在是太太太，一言难尽了。
+本项目的第一个版本，以这个精简版结束。
+
+准备第二季。
 
 

@@ -34,19 +34,6 @@ public:
     void setEncodingFormat(EncodingFormat format);
     void setOpusFrameLength(int frameLength);
 
-    // VAD 相关函数
-    bool initializeVAD(const VADConfig& config);
-    bool isVoiceActive(const float* input, size_t frameCount);
-    bool isVoiceActive(const int16_t* input, size_t frameCount);
-    void setVADThreshold(float threshold);
-    float getVADThreshold() const;
-    const VADStatus& getVADStatus() const;
-    void updateVADConfig(const VADConfig& config);
-    const VADConfig& getVADConfig() const;
-    bool shouldInsertSilenceFrame() const;
-    bool isSentenceEnd() const;
-    bool isIdle() const;
-
     int getSampleRate() const { return static_cast<int>(config_.sampleRate); }
     int getChannels() const { return static_cast<int>(config_.channels); }
 
