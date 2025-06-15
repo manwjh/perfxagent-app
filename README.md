@@ -1,4 +1,4 @@
-# PerfXAgent demo
+# PerfXAgent-应用程序demo
 ## 前言
 这个项目起念是我想探索一下大模型的自动代码编程能力，纯属为了好玩而已。
 我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈。
@@ -12,6 +12,8 @@
 笔记：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY（1）.md
 
 ## 第二季
-
+初心：实现一个录音文件的ASR解析，输出为TXT。如果可能，实现播放和TXT文件同步（也许借鉴当前歌词同步的规范）
+实现：准备进行中
+笔记：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY（2）.md
 
 ## 项目改来改去，README都不知道写啥，以后再写吧。
