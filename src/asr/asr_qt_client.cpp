@@ -88,24 +88,27 @@ bool AsrQtClient::connect() {
     
     qDebug() << "Connecting to ASR server:" << m_url;
     
-    // 构建带token的连接URL
     QUrl url(m_url);
-    QUrlQuery query(url);
     if (!m_cluster.isEmpty()) {
+        QUrlQuery query(url);
         query.addQueryItem("cluster", m_cluster);
+        url.setQuery(query);
     }
-    if (!m_token.isEmpty()) {
-        query.addQueryItem("token", m_token);
-    }
-    url.setQuery(query);
-    
+
     qDebug() << "Final URL:" << url.toString();
-    
+
+    // 构造带 Authorization Header 的请求
+    QNetworkRequest request(url);
+    if (!m_token.isEmpty()) {
+        QByteArray authHeader = "Bearer; " + m_token.toUtf8();
+        request.setRawHeader("Authorization", authHeader);
+    }
+
     // 启动连接超时定时器（10秒）
     m_connectionTimer->start(10000);
-    
-    // 连接WebSocket
-    m_webSocket->open(url);
+
+    // 使用带 header 的 open 方法（你需要的是 QWebSocket::open(QNetworkRequest)）
+    m_webSocket->open(request);
     
     return true;
 }
