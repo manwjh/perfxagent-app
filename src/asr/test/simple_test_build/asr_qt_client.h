@@ -80,13 +80,6 @@ public:
         CUSTOM_COMPRESS = 0b1111
     };
 
-    struct Credentials {
-        QString appId;
-        QString accessToken;
-        QString secretKey;
-        bool isValid = false;
-    };
-
     explicit AsrQtClient(QObject *parent = nullptr);
     ~AsrQtClient();
 
@@ -110,9 +103,6 @@ public:
 
     // 获取状态信息
     QString getFullClientRequestJson() const;
-
-    // 静态方法：从环境变量获取凭据
-    static Credentials getCredentialsFromEnv();
 
 signals:
     void connected();

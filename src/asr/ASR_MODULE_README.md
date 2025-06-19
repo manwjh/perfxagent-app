@@ -61,21 +61,21 @@ GET /api/v2/asr HTTP/1.1
 Host: openspeech.bytedance.com
 Accept: */*
 User-Agent: curl/7.54.0
-Authorization: Bearer; FYaWxBiJnuh-0KBTS00KCo73rxmDnalivd1UDSD-W5E=
-Authorization header 的格式是 Bearer; {token}
+Authorization: Bearer FYaWxBiJnuh-0KBTS00KCo73rxmDnalivd1UDSD-W5E=
+Authorization header 的格式是 Bearer {token}
 
 其中：
 - `Bearer`：授权方法名
 - `token`：控制台获取的访问令牌
-- 授权方法名和token之间使用 `;` 分割
+- 授权方法名和token之间使用空格分割
 
 ### 鉴权实现
 
 在WebSocket连接建立时，会自动在HTTP请求头中添加：
 
 ```cpp
-// 设置Authorization header: Bearer; {token}
-QString authHeader = QString("Bearer; %1").arg(m_token);
+// 设置Authorization header: Bearer {token}
+QString authHeader = QString("Bearer %1").arg(m_token);
 request.setRawHeader("Authorization", authHeader.toUtf8());
 
 // 设置其他必要的headers
@@ -106,7 +106,7 @@ asrClient->setCallback(callback.get());
 
 // 配置客户端（包含鉴权信息）
 asrClient->setAppId("8388344882");
-asrClient->setToken("vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3");
+asrClient->setToken("vQWuOVrg*************ZfA5q2lG3");
 asrClient->setSecretKey("oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e");
 asrClient->setAuthType(Asr::AsrClient::TOKEN);
 asrClient->setAudioFormat("wav", 1, 16000, 16);
@@ -127,7 +127,7 @@ auto manager = std::make_unique<Asr::AsrManager>();
 
 // 配置（包含鉴权信息）
 manager->setAppId("8388344882");
-manager->setToken("vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3");
+manager->setToken("vQWuOVrg*************ZfA5q2lG3");
 manager->setAudioFormat("wav", 1, 16000, 16);
 
 // 设置回调
@@ -148,7 +148,7 @@ if (manager->connect()) {
 ```cpp
 // 全局凭据定义
 #define ASR_APP_ID "8388344882"
-#define ASR_ACCESS_TOKEN "vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3"
+#define ASR_ACCESS_TOKEN "vQWuOVrg*************ZfA5q2lG3"
 #define ASR_SECRET_KEY "oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e"
 
 // 使用全局凭据
@@ -338,15 +338,15 @@ ASR模块使用示例
 ================
 使用硬编码的凭据:
   AppId: 8388344882
-  Token: vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3
+  Token: vQWuOVrg*************ZfA5q2lG3
   SecretKey: oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e
 
 === 示例1: 仅连接和断开（带Token鉴权） ===
 使用AppId: 8388344882
-使用Token: vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3
+使用Token: vQWuOVrg*************ZfA5q2lG3
 使用SecretKey: oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e
 Connecting to ASR server: "wss://openspeech.bytedance.com/api/v2/asr"
-Authorization header: "Bearer; vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3"
+Authorization header: "Bearer vQWuOVrg*************ZfA5q2lG3"
 示例执行完成
 ```
 

@@ -51,7 +51,7 @@ make
 **示例：**
 ```bash
 # 使用硬编码的凭据
-./bin/asr_usage_example 5 8388344882 vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3 test.wav
+./bin/asr_usage_example 5 8388344882 vQWuOVrg*************ZfA5q2lG3 test.wav
 
 # 使用自定义凭据
 ./bin/asr_usage_example 5 your_app_id your_token audio.wav your_cluster
@@ -97,7 +97,7 @@ make
 
 ```cpp
 #define ASR_APP_ID "8388344882"
-#define ASR_ACCESS_TOKEN "vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3"
+#define ASR_ACCESS_TOKEN "vQWuOVrg*************ZfA5q2lG3"
 #define ASR_SECRET_KEY "oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e"
 ```
 

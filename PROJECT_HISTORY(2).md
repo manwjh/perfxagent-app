@@ -128,10 +128,10 @@ SSL运行时版本: Secure Transport, macOS Sequoia (15.5)
 🚀 STEP1: 连接和鉴权
 ==================
 Connecting to ASR server: "wss://openspeech.bytedance.com/api/v2/asr"
-Final URL: "wss://openspeech.bytedance.com/api/v2/asr?token=vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3"
+Final URL: "wss://openspeech.bytedance.com/api/v2/asr?token=vQWuOVrg*************ZfA5q2lG3"
 🔗 WebSocket连接信息:
    URL: wss://openspeech.bytedance.com/api/v2/asr
-   Authorization: Bearer; vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3
+   Authorization: Bearer; vQWuOVrg*************ZfA5q2lG3
    User-Agent: PerfXAgent-ASR-Client/1.0
 
 ⏳ 等待连接建立...
@@ -143,6 +143,276 @@ zsh: suspended  ./bin/asr_usage_example
 wangjunhui@MacBook-Pro-5 build % 
 
 
-依然没有解决鉴权的问题。先上传一个版本先。
+(依然没有解决鉴权的问题。先上传一个版本先。)
+
+(如果你很确定的事情，就让AI掘地三尺，AI很容易走各种捷径，例如：1）换库，它不知道换库有可能造成其他代码可能会大动。)
 
 
+🚀 STEP1: 连接和鉴权
+==================
+Connecting to ASR server: "wss://openspeech.bytedance.com/api/v2/asr"
+Final URL: "wss://openspeech.bytedance.com/api/v2/asr"
+[WS] URL: "wss://openspeech.bytedance.com/api/v2/asr"
+[WS] Header: "host" : "openspeech.bytedance.com"
+[WS] Header: "accept" : "*/*"
+[WS] Header: "user-agent" : "curl/7.54.0"
+[WS] Header: "authorization" : "Bearer; vQWuOVrg*************ZfA5q2lG3"
+QWebSocket state before open: QAbstractSocket::UnconnectedState
+WebSocket state changed: QAbstractSocket::ConnectingState
+  - Local address: ""
+  - Local port: 0
+  - Peer address: ""
+  - Peer port: 0
+  - Is valid: false
+  - Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+QWebSocket state after open: QAbstractSocket::ConnectingState
+WebSocket local address: ""
+WebSocket local port: 0
+WebSocket peer address: ""
+WebSocket peer port: 0
+WebSocket is valid: false
+⏳ 等待连接建立...
+⏳ 等待连接中... (2秒)
+
+ai:
+关键发现：
+❌ WebSocket 根本没有启动成功
+Local address: "" - 本地地址为空
+Local port: 0 - 本地端口为0
+Peer address: "" - 远程地址为空
+Peer port: 0 - 远程端口为0
+Is valid: false - socket 无效
+Error: QAbstractSocket::UnknownSocketError - 未知错误
+🔍 问题分析
+WebSocket 调用 open() 后立即进入 ConnectingState，但底层 socket 根本没有创建成功
+没有本地端口和远程地址，说明 TCP 连接都没有建立
+这解释了为什么没有网络连接 - 因为 socket 创建就失败了
+🎯 根本原因
+Qt6 的 QWebSocket 在 macOS 下，即使使用 OpenSSL，底层 socket 创建也失败了。 这可能是：
+Qt6 的 QWebSocket 实现 bug
+macOS 系统限制
+Qt6 和 OpenSSL 的兼容性问题
+�� 解决方案
+尝试用 Qt5（如果你有 Qt5 环境）
+或者用其他 WebSocket 库，比如：
+websocketpp（和火山官方 C++ 代码一样）
+libwebsockets
+或者直接用 boost::asio::ssl + boost::beast::websocket
+你的代码和配置都是正确的，问题在于 Qt6 QWebSocket 在 macOS 下的兼容性。
+
+
+### [2025/6/19 18:55]
+漫长的一个下午，今天就干这事了。
+为了核实QTwebsocket和openssl兼容问题，或系统问题。构建了一个test_qt_websocket。
+
+venvwangjunhui@MacBook-Pro-5 test_build % ./test_qt_websocket wss://echo.websocket.org
+Testing WebSocket connection to: "wss://echo.websocket.org"
+Opening WebSocket...
+WebSocket state changed to: QAbstractSocket::ConnectingState
+=== Status Check ===
+State: QAbstractSocket::ConnectingState
+Local address: "192.168.3.204"
+Local port: 54450
+Peer address: "66.241.124.119"
+Peer port: 443
+Is valid: false
+Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+WebSocket state changed to: QAbstractSocket::ConnectedState
+WebSocket connected successfully!
+WebSocket state changed to: QAbstractSocket::ClosingState
+WebSocket state changed to: QAbstractSocket::UnconnectedState
+WebSocket disconnected
+
+//检测火山
+venvwangjunhui@MacBook-Pro-5 test_build % ./test_qt_websocket "wss://openspeech.bytedance.com/api/v1/asr"
+Testing WebSocket connection to: "wss://openspeech.bytedance.com/api/v1/asr"
+Opening WebSocket...
+WebSocket state changed to: QAbstractSocket::ConnectingState
+WebSocket error: QAbstractSocket::ConnectionRefusedError - "QWebSocketPrivate::processHandshake: Unhandled http status code: 301 (Moved Permanently)."
+
+找到问题了！
+问题分析
+错误信息显示："QWebSocketPrivate::processHandshake: Unhandled http status code: 301 (Moved Permanently)."
+这说明：
+火山 ASR 服务器返回了 301 重定向
+Qt6 QWebSocket 没有正确处理重定向
+需要手动处理重定向或使用正确的 URL
+
+//用curl测
+wangjunhui@MacBook-Pro-5 build % curl -v -I "https://openspeech.bytedance.com/api/v1/asr"
+* Host openspeech.bytedance.com:443 was resolved.
+* IPv6: (none)
+* IPv4: 221.230.244.90, 221.231.83.100, 117.85.69.238
+*   Trying 221.230.244.90:443...
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / x25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=*.bytedance.com
+*  start date: Mar 25 00:00:00 2025 GMT
+*  expire date: Mar 24 23:59:59 2026 GMT
+*  subjectAltName: host "openspeech.bytedance.com" matched cert's "*.bytedance.com"
+*  issuer: C=US; O=DigiCert Inc; OU=www.digicert.com; CN=RapidSSL TLS RSA CA G1
+*  SSL certificate verify ok.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 2: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Connected to openspeech.bytedance.com (221.230.244.90) port 443
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://openspeech.bytedance.com/api/v1/asr
+* [HTTP/2] [1] [:method: HEAD]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: openspeech.bytedance.com]
+* [HTTP/2] [1] [:path: /api/v1/asr]
+* [HTTP/2] [1] [user-agent: curl/8.13.0]
+* [HTTP/2] [1] [accept: */*]
+> HEAD /api/v1/asr HTTP/2
+> Host: openspeech.bytedance.com
+> User-Agent: curl/8.13.0
+> Accept: */*
+> 
+* Request completely sent off
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+< HTTP/2 404 
+HTTP/2 404 
+< server: Tengine
+server: Tengine
+< content-type: text/plain
+content-type: text/plain
+< content-length: 18
+content-length: 18
+< date: Thu, 19 Jun 2025 11:00:21 GMT
+date: Thu, 19 Jun 2025 11:00:21 GMT
+< x-tt-logid: 20250619190021B588E8DE77431F83AD75
+x-tt-logid: 20250619190021B588E8DE77431F83AD75
+< api-service-host: 10.144.132.13
+api-service-host: 10.144.132.13
+< server-timing: inner; dur=3
+server-timing: inner; dur=3
+< x-tt-trace-host: 01e6da77fcd94e746f31eaeb2b26279120eebebdb18c634ab9959edd8f765662e341eb05e30391ededa49cb04ecdb920b19e0a86a74a537e65cb1c85b9a4c4e6e0086f41925786560836de3464cb133b60a56dba56fca4d3fdc5a62153ecc3f0e6
+x-tt-trace-host: 01e6da77fcd94e746f31eaeb2b26279120eebebdb18c634ab9959edd8f765662e341eb05e30391ededa49cb04ecdb920b19e0a86a74a537e65cb1c85b9a4c4e6e0086f41925786560836de3464cb133b60a56dba56fca4d3fdc5a62153ecc3f0e6
+< x-tt-trace-tag: id=03;cdn-cache=miss;type=dyn
+x-tt-trace-tag: id=03;cdn-cache=miss;type=dyn
+< x-tt-trace-id: 00-250619190021B588E8DE77431F83AD75-50EDECCF3A721FFD-00
+x-tt-trace-id: 00-250619190021B588E8DE77431F83AD75-50EDECCF3A721FFD-00
+< x-alicdn-da-ups-status: endOs,0,404
+x-alicdn-da-ups-status: endOs,0,404
+< via: cache4.l2cn3031[24,0], dynamic2.cn2811[48,0]
+via: cache4.l2cn3031[24,0], dynamic2.cn2811[48,0]
+< server-timing: cdn-cache;desc=MISS,edge;dur=24,origin;dur=24
+server-timing: cdn-cache;desc=MISS,edge;dur=24,origin;dur=24
+< timing-allow-origin: *
+timing-allow-origin: *
+< eagleid: b47a4e2817503308211987036e
+eagleid: b47a4e2817503308211987036e
+< 
+
+* Connection #0 to host openspeech.bytedance.com left intact
+wangjunhui@MacBook-Pro-5 build % 
+
+//测试成功
+<_websocket wss://openspeech.bytedance.com/api/v2/asr
+Testing WebSocket connection to: "wss://openspeech.bytedance.com/api/v2/asr"
+Opening WebSocket...
+WebSocket state changed to: QAbstractSocket::ConnectingState
+WebSocket state changed to: QAbstractSocket::ConnectedState
+WebSocket connected successfully!
+WebSocket state changed to: QAbstractSocket::ClosingState
+WebSocket state changed to: QAbstractSocket::UnconnectedState
+WebSocket disconnected
+
+//终于成功了，我已经忘记最后是修改什么地方，让其成功的。
+venvwangjunhui@MacBook-Pro-5 build % ./bin/asr_usage_example
+ASR模块使用示例 - STEP调试版本
+===============================
+
+
+🔒 SSL支持检测
+=============
+SSL支持: ✅ 是
+SSL构建版本: Secure Transport, macOS Sequoia (15.5)
+SSL运行时版本: Secure Transport, macOS Sequoia (15.5)
+
+📋 STEP0: 检查网络连接
+==========================
+🔗 测试WebSocket连接到: wss://openspeech.bytedance.com/api/v2/asr
+✅ 网络可达: WebSocket连接成功
+
+🚀 STEP1: 连接和鉴权
+=======================
+Connecting to ASR server: "wss://openspeech.bytedance.com/api/v2/asr"
+Final URL: "wss://openspeech.bytedance.com/api/v2/asr"
+[WS] URL: "wss://openspeech.bytedance.com/api/v2/asr"
+[WS] Header: "host" : "openspeech.bytedance.com"
+[WS] Header: "accept" : "*/*"
+[WS] Header: "user-agent" : "curl/7.54.0"
+[WS] Header: "authorization" : "Bearer vQWuOVrg*************ZfA5q2lG3"
+QWebSocket state before open: QAbstractSocket::UnconnectedState
+WebSocket state changed: QAbstractSocket::ConnectingState
+  - Local address: ""
+  - Local port: 0
+  - Peer address: ""
+  - Peer port: 0
+  - Is valid: false
+  - Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+QWebSocket state after open: QAbstractSocket::ConnectingState
+WebSocket local address: ""
+WebSocket local port: 0
+WebSocket peer address: ""
+WebSocket peer port: 0
+WebSocket is valid: false
+⏳ 等待连接建立...
+WebSocket state changed: QAbstractSocket::ConnectedState
+  - Local address: "192.168.3.204"
+  - Local port: 55914
+  - Peer address: "221.229.209.220"
+  - Peer port: 443
+  - Is valid: true
+  - Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+WebSocket connected to ASR server
+Sending initial parameters
+Constructed full request, size: 314
+Request JSON: "{\"app\":{\"appid\":\"8388344882\",\"cluster\":\"\",\"token\":\"vQWuOVrg*************ZfA5q2lG3\"},\"audio\":{\"bits\":16,\"channel\":1,\"codec\":\"raw\",\"format\":\"wav\",\"language\":\"zh-CN\",\"rate\":16000},\"request\":{\"nbest\":1,\"reqid\":\"12cd9df6-b412-41b4-95e9-53ddd892242f\",\"result_type\":\"full\",\"sequence\":1,\"show_language\":false,\"show_utterances\":false,\"workflow\":\"audio_in,resample,partition,vad,fe,decode\"},\"user\":{\"uid\":\"asr_qt_demo\"}}"
+Initial parameters sent successfully
+
+✅ STEP1 完成: WebSocket连接已建立
+   - WebSocket握手完成
+   - 连接状态: 已连接
+   - Full Client Request已自动发送
+✅ STEP1 成功: 连接和鉴权完成
+🚚 实际发送的Full Client Request JSON:
+{"app":{"appid":"8388344882","cluster":"","token":"vQWuOVrg*************ZfA5q2lG3"},"audio":{"bits":16,"channel":1,"codec":"raw","format":"wav","language":"zh-CN","rate":16000},"request":{"nbest":1,"reqid":"12cd9df6-b412-41b4-95e9-53ddd892242f","result_type":"full","sequence":1,"show_language":false,"show_utterances":false,"workflow":"audio_in,resample,partition,vad,fe,decode"},"user":{"uid":"asr_qt_demo"}}
+
+📤 STEP2: 等待Full Client Request响应
+=======================================
+⏳ 等待Full Client Request响应...
+   - 连接建立后已自动发送Full Client Request
+   - 等待服务器确认响应
+WebSocket state changed: QAbstractSocket::ClosingState
+  - Local address: "192.168.3.204"
+  - Local port: 55914
+  - Peer address: "221.229.209.220"
+  - Peer port: 443
+  - Is valid: false
+  - Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+WebSocket state changed: QAbstractSocket::UnconnectedState
+  - Local address: "192.168.3.204"
+  - Local port: 55914
+  - Peer address: "221.229.209.220"
+  - Peer port: 443
+  - Is valid: false
+  - Error: QAbstractSocket::UnknownSocketError - "Unknown error"
+WebSocket disconnected from ASR server
+
+### 【2025/6/19 19:45】
+更新版本到github, 不忘把token key修改一下。 ：）

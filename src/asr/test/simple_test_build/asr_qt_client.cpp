@@ -3,7 +3,7 @@
 // 完全兼容火山ASR WebSocket协议，无外部依赖
 //
 
-#include "asr/asr_qt_client.h"
+#include "asr_qt_client.h"
 #include <QObject>
 #include <QMutexLocker>
 #include <QNetworkRequest>
@@ -26,7 +26,6 @@
 #include <QSslCipher>
 #include <QNetworkAccessManager>
 #include <QEventLoop>
-#include <iostream>
 
 namespace Asr {
 
@@ -292,12 +291,12 @@ void AsrQtClient::onWebSocketConnected() {
     m_connected = true;
     qDebug() << "WebSocket connected to ASR server";
     
-    // 发送初始化参数
-    if (!sendParams()) {
-        qWarning() << "Failed to send initial parameters";
-        disconnect();
-        return;
-    }
+    // 暂时不发送初始化参数，只测试基本连接
+    // if (!sendParams()) {
+    //     qWarning() << "Failed to send initial parameters";
+    //     disconnect();
+    //     return;
+    // }
     
     // 通知回调
     if (m_callback) {
@@ -610,40 +609,6 @@ QByteArray AsrQtClient::createBinaryMessage(MessageType type, MessageTypeFlag fl
     message.append(payload);
     
     return message;
-}
-
-AsrQtClient::Credentials AsrQtClient::getCredentialsFromEnv() {
-    Credentials creds;
-    QString envAppId = qgetenv("ASR_APP_ID");
-    QString envToken = qgetenv("ASR_ACCESS_TOKEN");
-    QString envSecret = qgetenv("ASR_SECRET_KEY");
-    if (!envAppId.isEmpty() && !envToken.isEmpty() && !envSecret.isEmpty()) {
-        std::cout << "🔐 使用环境变量中的凭据" << std::endl;
-        creds.appId = envAppId;
-        creds.accessToken = envToken;
-        creds.secretKey = envSecret;
-        creds.isValid = true;
-    } else {
-        std::cout << "⚠️  环境变量未设置，使用默认凭据（仅用于测试）" << std::endl;
-        std::cout << "   建议设置环境变量：" << std::endl;
-        std::cout << "   export ASR_APP_ID=your_app_id" << std::endl;
-        std::cout << "   export ASR_ACCESS_TOKEN=your_access_token" << std::endl;
-        std::cout << "   export ASR_SECRET_KEY=your_secret_key" << std::endl;
-        creds.appId = "8388344882";
-        creds.accessToken = "vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3";
-        creds.secretKey = "oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e";
-        creds.isValid = true;
-    }
-    // 脱敏显示
-    QString maskedToken = creds.accessToken;
-    if (maskedToken.length() > 8) {
-        maskedToken = maskedToken.left(4) + "****" + maskedToken.right(4);
-    }
-    std::cout << "📋 凭据信息:" << std::endl;
-    std::cout << "   - App ID: " << creds.appId.toStdString() << std::endl;
-    std::cout << "   - Access Token: " << maskedToken.toStdString() << std::endl;
-    std::cout << "   - Secret Key: " << (creds.secretKey.length() > 8 ? (creds.secretKey.left(4) + "****" + creds.secretKey.right(4)).toStdString() : "****") << std::endl;
-    return creds;
 }
 
 } 
