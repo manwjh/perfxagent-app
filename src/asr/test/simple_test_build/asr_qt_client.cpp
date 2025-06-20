@@ -420,7 +420,6 @@ bool AsrQtClient::sendParams() {
         return false;
     }
     
-    qDebug() << "Initial parameters sent successfully";
     return true;
 }
 
