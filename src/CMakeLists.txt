@@ -87,48 +87,6 @@ target_link_libraries(perfx_asr_qt PUBLIC
     z
 )
 
-# 添加 IXWebSocket 版本的 ASR 库
-add_library(perfx_asr_client STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_client.cpp
-    ${CMAKE_SOURCE_DIR}/include/asr/asr_client.h
-)
-
-target_include_directories(perfx_asr_client PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}
-    ${CMAKE_SOURCE_DIR}/third_party/ixwebsocket
-    ${nlohmann_json_INCLUDE_DIRS}
-)
-
-target_link_libraries(perfx_asr_client PUBLIC
-    ixwebsocket
-    nlohmann_json::nlohmann_json
-    z
-)
-
-# 添加 ASR 管理模块库
-add_library(perfx_asr_manager STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_manager.cpp
-    ${CMAKE_SOURCE_DIR}/include/asr/asr_manager.h
-)
-
-target_include_directories(perfx_asr_manager PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}
-    ${nlohmann_json_INCLUDE_DIRS}
-)
-
-target_link_libraries(perfx_asr_manager PUBLIC
-    perfx_asr_client
-    nlohmann_json::nlohmann_json
-)
-
 # 添加主应用程序
 set(HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/main_window.h
@@ -171,8 +129,6 @@ target_include_directories(perfxagent-app PRIVATE
 target_link_libraries(perfxagent-app PRIVATE
     perfx_audio
     perfx_asr_qt
-    perfx_asr_client
-    perfx_asr_manager
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
