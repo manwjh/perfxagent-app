@@ -169,6 +169,26 @@ if(APPLE)
     if(NOT NLOHMANN_JSON_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to find nlohmann-json prefix. Please ensure nlohmann-json is installed via Homebrew.")
     endif()
+
+    execute_process(
+        COMMAND brew --prefix websocketpp
+        OUTPUT_VARIABLE WEBSOCKETPP_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE WEBSOCKETPP_RESULT
+    )
+    if(NOT WEBSOCKETPP_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to find websocketpp prefix. Please ensure websocketpp is installed via Homebrew.")
+    endif()
+
+    execute_process(
+        COMMAND brew --prefix asio
+        OUTPUT_VARIABLE ASIO_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE ASIO_RESULT
+    )
+    if(NOT ASIO_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to find asio prefix. Please ensure asio is installed via Homebrew.")
+    endif()
     
     set(CMAKE_PREFIX_PATH 
         ${CMAKE_PREFIX_PATH} 
@@ -178,6 +198,8 @@ if(APPLE)
         "${OPUS_PREFIX}"
         "${OGG_PREFIX}"
         "${NLOHMANN_JSON_PREFIX}"
+        "${WEBSOCKETPP_PREFIX}"
+        "${ASIO_PREFIX}"
     )
     set(Qt6_DIR "${QT6_PREFIX}/lib/cmake/Qt6")
     set(BOOST_ROOT "${BOOST_PREFIX}")
@@ -185,6 +207,8 @@ if(APPLE)
     set(BOOST_LIBRARYDIR "${BOOST_PREFIX}/lib")
     include_directories(${PORTAUDIO_PREFIX}/include)
     include_directories(${NLOHMANN_JSON_PREFIX}/include)
+    include_directories(${WEBSOCKETPP_PREFIX}/include)
+    include_directories(${ASIO_PREFIX}/include)
 endif()
 
 if(WIN32)
@@ -248,6 +272,7 @@ include_directories(
     ${OGG_INCLUDE_DIRS}
     ${SNDFILE_INCLUDE_DIRS}
     ${nlohmann_json_INCLUDE_DIRS}
+    ${ASIO_PREFIX}/include
 )
 
 # 添加库目录
@@ -266,6 +291,9 @@ find_package(OpenSSL REQUIRED)
 # 添加子目录
 add_subdirectory(src)
 add_subdirectory(examples)
+
+# 构建 ixwebsocket 库
+add_subdirectory(third_party/ixwebsocket)
 
 # macOS 特定配置
 if(APPLE)
