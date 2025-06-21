@@ -16,6 +16,138 @@ namespace perfx {
 namespace audio {
 
 /**
+ * @brief 歌词同步格式结构体
+ * 用于存储带时间戳的文本片段，支持歌词同步显示
+ */
+struct LyricSegment {
+    std::string text;           // 文本内容
+    double startTime;           // 开始时间（毫秒）
+    double endTime;             // 结束时间（毫秒）
+    double confidence;          // 置信度
+    bool isFinal;               // 是否为最终结果
+    
+    LyricSegment() : startTime(0.0), endTime(0.0), confidence(0.0), isFinal(false) {}
+    LyricSegment(const std::string& t, double start, double end, double conf = 0.0, bool final = false)
+        : text(t), startTime(start), endTime(end), confidence(conf), isFinal(final) {}
+};
+
+/**
+ * @brief 歌词同步格式管理器
+ * 管理ASR转录结果的歌词同步格式转换和存储
+ */
+struct LyricSyncManager {
+    std::vector<LyricSegment> segments;     // 歌词片段列表
+    std::string fullText;                   // 完整文本
+    double totalDuration;                   // 总时长（毫秒）
+    mutable std::mutex mutex;               // 线程安全锁（mutable以支持const函数）
+    
+    LyricSyncManager() : totalDuration(0.0) {}
+    
+    // 清空所有数据
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        segments.clear();
+        fullText.clear();
+        totalDuration = 0.0;
+    }
+    
+    // 添加歌词片段
+    void addSegment(const LyricSegment& segment) {
+        std::lock_guard<std::mutex> lock(mutex);
+        segments.push_back(segment);
+        updateFullText();
+        if (segment.endTime > totalDuration) {
+            totalDuration = segment.endTime;
+        }
+    }
+    
+    // 更新完整文本
+    void updateFullText() {
+        fullText.clear();
+        for (const auto& segment : segments) {
+            if (!fullText.empty()) {
+                fullText += " ";
+            }
+            fullText += segment.text;
+        }
+    }
+    
+    // 获取指定时间点的歌词片段
+    std::vector<LyricSegment> getSegmentsAtTime(double timeMs) const {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<LyricSegment> result;
+        for (const auto& segment : segments) {
+            if (timeMs >= segment.startTime && timeMs <= segment.endTime) {
+                result.push_back(segment);
+            }
+        }
+        return result;
+    }
+    
+    // 获取当前播放位置的歌词
+    std::string getCurrentLyric(double timeMs) const {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& segment : segments) {
+            if (timeMs >= segment.startTime && timeMs <= segment.endTime) {
+                return segment.text;
+            }
+        }
+        return "";
+    }
+    
+    // 导出为LRC格式
+    std::string exportToLRC() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::string lrc;
+        lrc += "[ti:ASR转录结果]\n";
+        lrc += "[ar:自动语音识别]\n";
+        lrc += "[al:PerfXAgent]\n";
+        lrc += "[by:ASR转录]\n\n";
+        
+        for (const auto& segment : segments) {
+            // 转换毫秒为LRC时间格式 [mm:ss.xx]
+            int minutes = static_cast<int>(segment.startTime) / 60000;
+            int seconds = (static_cast<int>(segment.startTime) % 60000) / 1000;
+            int centiseconds = (static_cast<int>(segment.startTime) % 1000) / 10;
+            
+            char timeStr[16];
+            snprintf(timeStr, sizeof(timeStr), "[%02d:%02d.%02d]", minutes, seconds, centiseconds);
+            
+            lrc += timeStr + segment.text + "\n";
+        }
+        return lrc;
+    }
+    
+    // 导出为JSON格式
+    std::string exportToJSON() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::string json = "{\n";
+        json += "  \"fullText\": \"" + fullText + "\",\n";
+        json += "  \"totalDuration\": " + std::to_string(totalDuration) + ",\n";
+        json += "  \"segments\": [\n";
+        
+        for (size_t i = 0; i < segments.size(); ++i) {
+            const auto& segment = segments[i];
+            json += "    {\n";
+            json += "      \"text\": \"" + segment.text + "\",\n";
+            json += "      \"startTime\": " + std::to_string(segment.startTime) + ",\n";
+            json += "      \"endTime\": " + std::to_string(segment.endTime) + ",\n";
+            json += "      \"confidence\": " + std::to_string(segment.confidence) + ",\n";
+            json += "      \"isFinal\": " + std::string(segment.isFinal ? "true" : "false") + "\n";
+            json += "    }";
+            if (i < segments.size() - 1) {
+                json += ",";
+            }
+            json += "\n";
+        }
+        
+        json += "  ]\n";
+        json += "}";
+        return json;
+    }
+};
+
+/**
  * @brief 输出设置结构
  * 定义了音频输出的相关参数
  */
@@ -64,6 +196,80 @@ public:
     
     // 清理资源
     void cleanup();
+
+    // ============================================================================
+    // 歌词同步格式相关接口
+    // ============================================================================
+    
+    /**
+     * @brief 获取歌词同步管理器
+     * @return 歌词同步管理器引用
+     */
+    LyricSyncManager& getLyricSyncManager() { return lyricSyncManager_; }
+    
+    /**
+     * @brief 从ASR结果更新歌词同步数据
+     * @param asrResult ASR识别结果JSON字符串
+     * @return 是否成功更新
+     */
+    bool updateLyricSyncFromASR(const std::string& asrResult);
+    
+    /**
+     * @brief 添加歌词片段
+     * @param segment 歌词片段
+     */
+    void addLyricSegment(const LyricSegment& segment);
+    
+    /**
+     * @brief 获取指定时间点的歌词
+     * @param timeMs 时间（毫秒）
+     * @return 当前时间点的歌词文本
+     */
+    std::string getCurrentLyric(double timeMs);
+    
+    /**
+     * @brief 获取所有歌词片段
+     * @return 歌词片段列表
+     */
+    std::vector<LyricSegment> getAllLyricSegments() const;
+    
+    /**
+     * @brief 获取完整文本
+     * @return 完整的转录文本
+     */
+    std::string getFullTranscriptionText() const;
+    
+    /**
+     * @brief 导出为LRC格式
+     * @return LRC格式字符串
+     */
+    std::string exportLyricsToLRC() const;
+    
+    /**
+     * @brief 导出为JSON格式
+     * @return JSON格式字符串
+     */
+    std::string exportLyricsToJSON() const;
+    
+    /**
+     * @brief 保存歌词到文件
+     * @param filePath 文件路径
+     * @param format 格式类型 ("lrc" 或 "json")
+     * @return 是否保存成功
+     */
+    bool saveLyricsToFile(const std::string& filePath, const std::string& format = "lrc");
+    
+    /**
+     * @brief 清空歌词数据
+     */
+    void clearLyrics();
+
+    /**
+     * @brief 从ASR结果更新歌词同步数据
+     * @param asrResult ASR识别结果JSON字符串
+     * @return 是否成功更新
+     */
+    bool parseASRResult(const std::string& jsonStr);
 
     // WAV文件操作
     struct WavHeader {
@@ -122,12 +328,14 @@ Q_SIGNALS:
     void conversionProgress(int progress);
     void conversionComplete(const QString& outputFile);
     void error(const QString& errorMessage);
+    void lyricUpdated(const QString& lyric, double timeMs);  // 新增：歌词更新信号
 
 public Q_SLOTS:
     void emitOutputFileInfo(const QString& info) { emit outputFileInfo(info); }
     void emitConversionProgress(int progress) { emit conversionProgress(progress); }
     void emitConversionComplete(const QString& outputFile) { emit conversionComplete(outputFile); }
     void emitError(const QString& errorMessage) { emit error(errorMessage); }
+    void emitLyricUpdated(const QString& lyric, double timeMs) { emit lyricUpdated(lyric, timeMs); }
 
 private:
     class Impl;
@@ -143,6 +351,9 @@ private:
     AudioConfig currentConfig_;
     std::string lastError_;
     std::mutex mutex_;
+    
+    // 歌词同步管理器
+    LyricSyncManager lyricSyncManager_;
 };
 
 } // namespace audio

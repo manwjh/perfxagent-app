@@ -58,33 +58,46 @@ target_link_libraries(perfx_audio PUBLIC
     ${SNDFILE_LIBRARIES}
 )
 
-# 添加纯Qt版本的ASR库
-add_library(perfx_asr_qt STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_qt_client.cpp
-    ${CMAKE_SOURCE_DIR}/include/asr/asr_qt_client.h
+# 添加 IXWebSocket 版本的 ASR 库
+add_library(perfx_asr_client STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_client.cpp
+    ${CMAKE_SOURCE_DIR}/include/asr/asr_client.h
 )
 
-target_include_directories(perfx_asr_qt PUBLIC
+target_include_directories(perfx_asr_client PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/perfx_asr_qt_autogen/include
-    ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
-    ${Qt6WebSockets_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/third_party/ixwebsocket
+    ${nlohmann_json_INCLUDE_DIRS}
 )
 
-set_target_properties(perfx_asr_qt PROPERTIES
-    AUTOMOC_MOC_OPTIONS "-I${CMAKE_SOURCE_DIR}/include"
-)
-
-target_link_libraries(perfx_asr_qt PUBLIC
-    Qt6::Core
-    Qt6::Network
-    Qt6::WebSockets
+target_link_libraries(perfx_asr_client PUBLIC
+    ixwebsocket
+    nlohmann_json::nlohmann_json
     z
+)
+
+# 添加 ASR 管理模块库
+add_library(perfx_asr_manager STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_manager.cpp
+    ${CMAKE_SOURCE_DIR}/include/asr/asr_manager.h
+)
+
+target_include_directories(perfx_asr_manager PUBLIC
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${nlohmann_json_INCLUDE_DIRS}
+)
+
+target_link_libraries(perfx_asr_manager PUBLIC
+    perfx_asr_client
+    nlohmann_json::nlohmann_json
 )
 
 # 添加主应用程序
@@ -128,7 +141,8 @@ target_include_directories(perfxagent-app PRIVATE
 # 链接主应用程序的依赖
 target_link_libraries(perfxagent-app PRIVATE
     perfx_audio
-    perfx_asr_qt
+    perfx_asr_client
+    perfx_asr_manager
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

@@ -251,7 +251,13 @@ public:
             
             // 确保父目录存在
             if (!parentPath.empty() && !std::filesystem::exists(parentPath)) {
-                std::filesystem::create_directories(parentPath);
+                try {
+                    std::filesystem::create_directories(parentPath);
+                } catch (const std::exception& e) {
+                    lastError_ = "Failed to create parent directory: " + std::string(e.what());
+                    std::cerr << "[ERROR] " << lastError_ << std::endl;
+                    return false;
+                }
             }
 
             // 计算数据大小 - 录音缓冲区始终使用INT16格式
@@ -344,7 +350,13 @@ public:
             std::filesystem::path filePath(filename);
             std::filesystem::path parentPath = filePath.parent_path();
             if (!parentPath.empty() && !std::filesystem::exists(parentPath)) {
-                std::filesystem::create_directories(parentPath);
+                try {
+                    std::filesystem::create_directories(parentPath);
+                } catch (const std::exception& e) {
+                    lastError_ = "Failed to create parent directory: " + std::string(e.what());
+                    std::cerr << "[ERROR] " << lastError_ << std::endl;
+                    return false;
+                }
             }
 
             // 创建 Opus 编码器
@@ -1469,6 +1481,145 @@ bool AudioManager::saveAudioConfig(const AudioConfig& inputConfig, const OutputS
         
     } catch (const std::exception& e) {
         std::cerr << "Error saving audio config: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// ============================================================================
+// 歌词同步格式相关方法实现
+// ============================================================================
+
+bool AudioManager::updateLyricSyncFromASR(const std::string& asrResult) {
+    return parseASRResult(asrResult);
+}
+
+void AudioManager::addLyricSegment(const LyricSegment& segment) {
+    lyricSyncManager_.addSegment(segment);
+    
+    // 发送歌词更新信号
+    emitLyricUpdated(QString::fromStdString(segment.text), segment.startTime);
+}
+
+std::string AudioManager::getCurrentLyric(double timeMs) {
+    return lyricSyncManager_.getCurrentLyric(timeMs);
+}
+
+std::vector<LyricSegment> AudioManager::getAllLyricSegments() const {
+    // 直接返回segments的副本，LyricSyncManager内部已经处理了线程安全
+    std::lock_guard<std::mutex> lock(lyricSyncManager_.mutex);
+    return lyricSyncManager_.segments;
+}
+
+std::string AudioManager::getFullTranscriptionText() const {
+    // 直接返回fullText的副本，LyricSyncManager内部已经处理了线程安全
+    std::lock_guard<std::mutex> lock(lyricSyncManager_.mutex);
+    return lyricSyncManager_.fullText;
+}
+
+std::string AudioManager::exportLyricsToLRC() const {
+    return lyricSyncManager_.exportToLRC();
+}
+
+std::string AudioManager::exportLyricsToJSON() const {
+    return lyricSyncManager_.exportToJSON();
+}
+
+bool AudioManager::saveLyricsToFile(const std::string& filePath, const std::string& format) {
+    try {
+        std::ofstream file(filePath);
+        if (!file.is_open()) {
+            lastError_ = "无法打开文件: " + filePath;
+            return false;
+        }
+        
+        std::string content;
+        if (format == "lrc") {
+            content = exportLyricsToLRC();
+        } else if (format == "json") {
+            content = exportLyricsToJSON();
+        } else {
+            lastError_ = "不支持的格式: " + format + " (支持: lrc, json)";
+            return false;
+        }
+        
+        file << content;
+        file.close();
+        
+        std::cout << "✓ 歌词已保存到: " << filePath << " (格式: " << format << ")" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        lastError_ = "保存歌词文件时发生错误: " + std::string(e.what());
+        return false;
+    }
+}
+
+void AudioManager::clearLyrics() {
+    lyricSyncManager_.clear();
+    std::cout << "✓ 歌词数据已清空" << std::endl;
+}
+
+bool AudioManager::parseASRResult(const std::string& jsonStr) {
+    try {
+        auto j = nlohmann::json::parse(jsonStr);
+        
+        // 检查是否包含result字段
+        if (!j.contains("result")) {
+            std::cerr << "❌ ASR结果缺少result字段" << std::endl;
+            return false;
+        }
+        
+        auto& result = j["result"];
+        
+        // 检查是否包含utterances字段（火山引擎ASR的完整结果格式）
+        if (result.contains("utterances") && result["utterances"].is_array()) {
+            auto& utterances = result["utterances"];
+            
+            for (const auto& utterance : utterances) {
+                if (utterance.contains("words") && utterance["words"].is_array()) {
+                    auto& words = utterance["words"];
+                    
+                    for (const auto& word : words) {
+                        if (word.contains("text") && word.contains("start_time") && word.contains("end_time")) {
+                            LyricSegment segment;
+                            segment.text = word["text"];
+                            segment.startTime = word["start_time"];
+                            segment.endTime = word["end_time"];
+                            segment.confidence = word.value("confidence", 0.0);
+                            segment.isFinal = utterance.value("definite", false);
+                            
+                            addLyricSegment(segment);
+                        }
+                    }
+                }
+            }
+        }
+        // 检查是否只有简单的text字段（中间结果）
+        else if (result.contains("text")) {
+            std::string text = result["text"];
+            if (!text.empty()) {
+                // 对于中间结果，我们创建一个临时的歌词片段
+                // 时间戳暂时设为0，等待最终结果
+                LyricSegment segment;
+                segment.text = text;
+                segment.startTime = 0.0;
+                segment.endTime = 0.0;
+                segment.confidence = result.value("confidence", 0.0);
+                segment.isFinal = false;
+                
+                addLyricSegment(segment);
+            }
+        }
+        
+        std::cout << "✓ ASR结果解析完成，歌词同步数据已更新" << std::endl;
+        return true;
+        
+    } catch (const nlohmann::json::exception& e) {
+        std::cerr << "❌ JSON解析错误: " << e.what() << std::endl;
+        lastError_ = "JSON解析错误: " + std::string(e.what());
+        return false;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ 解析ASR结果时发生错误: " << e.what() << std::endl;
+        lastError_ = "解析ASR结果时发生错误: " + std::string(e.what());
         return false;
     }
 }

@@ -1,19 +1,187 @@
-# PerfXAgent-应用程序demo
-## 前言
-这个项目起念是我想探索一下大模型的自动代码编程能力，纯属为了好玩而已。
-我是一个"老"程序员，不过已经有十多年不写代码了。大模型唤醒了我写代码的灵魂，哈哈哈。
-因为，有了AI Coding工具，不需要再花时间去复习代码的编程规范，同时也不需要去自己update的最新的知识。
-所以，我想尝试用一个全新的方式"写"项目，试图不写"一行"实际代码。
-会有人期待吗？
+# PerfxAgent App
 
-## 第一季
-初心：想构建一个音频的采集&编码+Websocket+ASR转换+LLM对话+TTS输出，我知道有很多类似的项目。但就想通过重新让AI写一个，来理解AI Coding的靠谱程度，如何驾驭它。
-实现：项目太复杂，我+AI都驾驭不了，进行了收敛。只完成了音源选择，音频流编码，保存为wav或者opus文件的基础代码。
-笔记：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY（1）.md
+一个基于Qt6的跨平台应用程序，提供音频处理、摄像头控制和自动语音识别(ASR)功能。
 
-## 第二季
-初心：实现一个录音文件的ASR解析，输出为TXT。如果可能，实现播放和TXT文件同步（也许借鉴当前歌词同步的规范）
-实现：准备进行中
-笔记：https://github.com/manwjh/perfxagent-app/blob/main/PROJECT_HISTORY（2）.md
+## 功能特性
 
-## 项目改来改去，README都不知道写啥，以后再写吧。
+- 🎤 **音频处理**: 音频录制、播放和格式转换
+- 📹 **摄像头控制**: 摄像头设备管理和视频捕获
+- 🗣️ **语音识别**: 集成ASR服务，支持实时语音转文字
+- 🖥️ **现代化UI**: 基于Qt6的图形用户界面
+- 🔌 **WebSocket支持**: 使用IXWebSocket库进行网络通信
+
+## 系统要求
+
+- **操作系统**: macOS, Linux, Windows
+- **编译器**: 支持C++17的编译器 (GCC 7+, Clang 5+, MSVC 2017+)
+- **CMake**: 3.10或更高版本
+- **Qt**: Qt6 (Core, Widgets, Network, Gui, Multimedia, WebEngineWidgets, WebSockets)
+
+### macOS依赖
+
+```bash
+# 使用Homebrew安装依赖
+brew install qt@6
+brew install openssl@3
+brew install portaudio
+brew install boost
+brew install opus
+brew install libogg
+brew install nlohmann-json
+brew install websocketpp
+brew install asio
+```
+
+## 构建步骤
+
+### 主应用程序
+
+1. **克隆项目**
+   ```bash
+   git clone <repository-url>
+   cd perfxagent-app-1.0.1_已上传为1.2.0
+   ```
+
+2. **创建构建目录**
+   ```bash
+   mkdir build
+   cd build
+   ```
+
+3. **配置项目**
+   ```bash
+   cmake ..
+   ```
+
+4. **编译项目**
+   ```bash
+   make -j$(nproc)
+   ```
+
+### 示例项目
+
+项目包含多个示例程序，可以单独编译和运行：
+
+#### ASR简单示例
+
+ASR（自动语音识别）模块提供了一个简单的示例，演示如何用一行代码完成音频文件到文本的转换：
+
+```bash
+# 编译ASR示例
+cd examples
+mkdir build
+cd build
+cmake ..
+make asr_simple_example
+
+# 运行ASR示例
+./asr_simple_example
+```
+
+**ASR示例功能**:
+- 🎯 **一行代码调用**: `manager.recognizeAudioFile(audioFile)` 完成完整识别流程
+- 🔄 **异步处理**: 支持实时回调处理识别结果
+- 📝 **结果提取**: 自动解析JSON格式的识别结果
+- ⚡ **WebSocket通信**: 基于IXWebSocket的稳定连接
+
+#### 其他示例
+
+```bash
+# 编译所有示例
+cd examples/build
+make
+
+# 运行特定示例
+./audio_example          # 音频处理示例
+./camera_example         # 摄像头控制示例
+./asr_ixwebsocket_example # ASR WebSocket示例
+```
+
+## ASR模块详解
+
+### 核心组件
+
+- **AsrManager**: 高级管理类，提供简化的API接口
+- **AsrClient**: 底层WebSocket客户端，处理与ASR服务的通信
+- **AsrCallback**: 回调接口，处理识别结果和状态变化
+
+### 使用示例
+
+```cpp
+#include <asr/asr_manager.h>
+
+// 创建管理器和回调
+Asr::AsrManager manager;
+SimpleCallback callback;
+manager.setCallback(&callback);
+
+// 一行代码完成音频识别
+bool success = manager.recognizeAudioFile("audio.wav");
+```
+
+### 支持格式
+
+- **音频格式**: WAV, MP3, FLAC, OGG
+- **采样率**: 8kHz - 48kHz
+- **声道**: 单声道/立体声
+- **编码**: PCM, Opus, MP3
+
+## 运行
+
+### 主应用程序
+
+编译完成后，在build目录中运行：
+
+```bash
+./perfxagent-app
+```
+
+### 示例程序
+
+```bash
+# ASR示例
+cd examples/build
+./asr_simple_example
+
+# 音频示例
+./audio_example
+
+# 摄像头示例
+./camera_example
+```
+
+## 项目结构
+
+```
+├── include/          # 头文件
+│   ├── asr/         # 语音识别相关
+│   │   ├── asr_client.h    # ASR客户端
+│   │   └── asr_manager.h   # ASR管理器
+│   ├── audio/       # 音频处理相关
+│   ├── camera/      # 摄像头相关
+│   └── ui/          # 用户界面相关
+├── src/             # 源代码
+├── examples/        # 示例代码
+│   ├── asr_simple_example.cpp      # ASR简单示例
+│   ├── asr_ixwebsocket_example.cpp # ASR WebSocket示例
+│   ├── audio_example.cpp           # 音频处理示例
+│   └── camera_example.cpp          # 摄像头示例
+├── third_party/     # 第三方库
+└── docs/           # 文档
+```
+
+## 版本信息
+
+当前版本: 1.2.0
+
+## 许可证
+
+请查看项目根目录下的许可证文件。
+
+## 贡献
+
+欢迎提交Issue和Pull Request来改进这个项目。
+
+## 支持
+
+如果遇到问题，请查看 `docs/` 目录下的文档或提交Issue。 
