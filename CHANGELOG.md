@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2024-12-19
+
+### Added
+- 完整的录音文件到ASR识别流程
+  - 音频录制功能优化
+  - 实时音频流处理
+  - ASR语音识别集成
+- 界面流式显示功能
+  - 实时文字显示ASR识别结果
+  - 音频包完整识别显示
+  - 用户界面优化和现代化
+
+### Changed
+- 重构音频处理模块
+- 优化ASR客户端连接稳定性
+- 改进用户界面响应性能
+
+### Fixed
+- 修复音频录制中断问题
+- 解决ASR识别结果显示延迟
+
 ## [1.1.0] - 2024-03-21
 
 ### Added
