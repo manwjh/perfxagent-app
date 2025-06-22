@@ -433,7 +433,15 @@ image.png
 
 - ai大神也奔溃了吗？求我手动改😓
 ai>> 自动修改再次失败。看来我只能再次请求您手动应用这个更改了。
-请在 src/ui/realtime_audio_to_text_window.cpp 文件中找到 onAsrTranscriptionUpdated 函数，并将其替换为以下代码：
+请在 src/ui/realtime_audio_to_text_window.cpp 文件中找到 onAsrTranscriptionUpdated 函数，并将其替换为以下代码：....
+
+
+## <font color="blue">【2025/6/22 21:44】</font>
+- 我决定将这个版本更新到仓库主线，好得可以编译，流程基本跑通，功能基本正常。
+- 周末还有几小时，享受周末去。
+to_ai>> 将本代码的版本修改为1.5.0
+1. 完成了主界面仿手机界面修改
+2. 完成了实时转录的界面设计，流式wav录音，asr文字同步解析（基本好了）。
 
 
 

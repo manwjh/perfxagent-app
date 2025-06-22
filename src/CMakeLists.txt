@@ -104,14 +104,18 @@ target_link_libraries(perfx_asr_manager PUBLIC
 set(HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/main_window.h
     ${CMAKE_SOURCE_DIR}/include/ui/audio_to_text_window.h
+    ${CMAKE_SOURCE_DIR}/include/ui/realtime_audio_to_text_window.h
+    ${CMAKE_SOURCE_DIR}/include/logic/realtime_transcription_controller.h
+    ${CMAKE_SOURCE_DIR}/include/ui/app_icon_button.h
 )
 
 add_executable(perfxagent-app
     main.cpp
     ui/main_window.cpp
     ui/audio_to_text_window.cpp
-    camera/camera_device.cpp
-    camera/camera_manager.cpp
+    ui/realtime_audio_to_text_window.cpp
+    logic/realtime_transcription_controller.cpp
+    ui/app_icon_button.cpp
     ${HEADERS}
 )
 

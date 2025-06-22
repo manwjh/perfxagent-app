@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2024-12-19
+
+### Added
+- 主界面仿手机界面修改
+  - 重新设计主界面布局，采用手机界面风格
+  - 优化用户交互体验
+  - 改进界面响应性和视觉效果
+- 实时转录界面设计
+  - 全新的实时转录界面布局
+  - 流式WAV录音功能
+  - ASR文字同步解析功能
+  - 实时显示转录结果
+
+### Changed
+- 界面设计风格统一化
+- 优化实时音频处理流程
+- 改进ASR识别结果展示
+
+### Fixed
+- 修复实时转录界面显示问题
+- 优化音频流处理稳定性
+
 ## [1.3.0] - 2024-12-19
 
 ### Added

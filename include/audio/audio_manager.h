@@ -11,6 +11,9 @@
 #include <mutex>
 #include <QObject>
 #include <QString>
+#include <QVector>
+#include <chrono>
+#include <functional>
 
 namespace perfx {
 namespace audio {
@@ -164,6 +167,26 @@ class AudioManager : public QObject {
     Q_OBJECT
 
 public:
+    // 录音状态枚举
+    enum class RecordingState {
+        IDLE,           // 空闲状态
+        PREVIEWING,     // 预备/波形预览中
+        RECORDING,      // 录音中
+        PAUSED,         // 暂停
+        STOPPING        // 正在停止
+    };
+
+    // 录音信息结构
+    struct RecordingInfo {
+        RecordingState state = RecordingState::IDLE;
+        std::string outputFile;
+        size_t recordedBytes = 0;
+        size_t recordedFrames = 0;
+        std::chrono::steady_clock::time_point startTime;
+        std::chrono::steady_clock::time_point pauseTime;
+        double totalPausedTime = 0.0;  // 总暂停时间（秒）
+    };
+
     static AudioManager& getInstance() {
         static AudioManager instance;
         return instance;
@@ -179,6 +202,8 @@ public:
     bool initialize(const AudioConfig& config = AudioConfig::getDefaultInputConfig());
     bool startRecording(const std::string& outputFile);
     bool stopRecording();
+    bool pauseRecording();
+    bool resumeRecording();
     bool updateConfig(const AudioConfig& config);
     const AudioConfig& getConfig() const;
 
@@ -198,7 +223,29 @@ public:
     void cleanup();
 
     // ============================================================================
-    // 歌词同步格式相关接口
+    // 流式录音功能
+    // ============================================================================
+    
+    // 流式录音控制
+    bool startStreamRecording(const std::string& outputFile);
+    bool startWritingToFile(const std::string& outputFile);
+    bool startAudioStreamOnly();  // 仅启动音频流，不保存文件
+    bool pauseStreamRecording();
+    bool resumeStreamRecording();
+    bool stopStreamRecording();
+    bool stopWritingToFile();
+    
+    // 状态查询
+    RecordingState getRecordingState() const;
+    RecordingInfo getRecordingInfo() const;
+    double getRecordingDuration() const;  // 返回录音时长（秒）
+    size_t getRecordedBytes() const;
+    
+    // 波形数据获取
+    QVector<float> getLatestWaveformData() const;
+
+    // ============================================================================
+    // 歌词同步功能
     // ============================================================================
     
     /**
@@ -264,13 +311,6 @@ public:
      */
     void clearLyrics();
 
-    /**
-     * @brief 从ASR结果更新歌词同步数据
-     * @param asrResult ASR识别结果JSON字符串
-     * @return 是否成功更新
-     */
-    bool parseASRResult(const std::string& jsonStr);
-
     // WAV文件操作
     struct WavHeader {
         char riff[4];        // "RIFF"
@@ -317,6 +357,9 @@ public:
     // 获取最后一次错误信息
     std::string getLastError() const { return lastError_; }
 
+    // 设置外部音频数据回调
+    void setExternalAudioCallback(std::function<void(const void*, void*, size_t)> callback);
+
     // 从JSON文件加载音频配置
     bool loadAudioConfig(AudioConfig& inputConfig, OutputSettings& outputSettings, const std::string& configPath);
     
@@ -329,6 +372,12 @@ Q_SIGNALS:
     void conversionComplete(const QString& outputFile);
     void error(const QString& errorMessage);
     void lyricUpdated(const QString& lyric, double timeMs);  // 新增：歌词更新信号
+    
+    // 流式录音信号
+    void recordingStateChanged(RecordingState state);
+    void recordingProgressUpdated(double duration, size_t bytes);
+    void waveformDataUpdated(const QVector<float>& waveformData);
+    void recordingCompleted(const QString& filePath);
 
 public Q_SLOTS:
     void emitOutputFileInfo(const QString& info) { emit outputFileInfo(info); }

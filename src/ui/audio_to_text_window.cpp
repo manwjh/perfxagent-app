@@ -61,10 +61,6 @@ public:
             std::cout << "[DEBUG] ASR回调收到消息，长度: " << message.length() << std::endl;
             std::cout << "[DEBUG] 消息内容: " << message << std::endl;
             
-            if (audioManager_) {
-                audioManager_->parseASRResult(message);
-            }
-            
             QJsonDocument doc = QJsonDocument::fromJson(QString::fromUtf8(message.c_str()).toUtf8());
             if (!doc.isObject()) {
                 std::cout << "[DEBUG] JSON解析失败，不是对象" << std::endl;

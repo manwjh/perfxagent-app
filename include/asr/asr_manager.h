@@ -11,7 +11,7 @@
 // - 配置管理和凭据管理
 // 
 // 作者: PerfXAgent Team
-// 版本: 1.2.0
+// 版本: 1.5.0
 // 日期: 2024
 // 参考: 火山引擎 ASR WebSocket 协议文档
 //
@@ -24,6 +24,8 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <map>
+#include <mutex>
 #include "asr/asr_client.h"
 #include "asr/asr_debug_config.h"
 
@@ -192,6 +194,19 @@ public:
     bool startRecognition();
 
     // ============================================================================
+    // 实时流识别 (新增)
+    // ============================================================================
+    bool startRealtimeStreaming(int sampleRate, int channels, int bitsPerSample);
+    void stopRealtimeStreaming();
+    void pauseRealtimeStreaming();
+    void resumeRealtimeStreaming();
+    bool sendRealtimeAudio(const void* data, size_t frameCount);
+    
+    // 实时流状态查询
+    bool isRealtimeStreaming() const { return isRealtimeStreaming_; }
+    bool isRealtimePaused() const { return isRealtimePaused_; }
+
+    // ============================================================================
     // 音频文件处理
     // ============================================================================
     AudioFileInfo parseAudioFile(const std::string& filePath);
@@ -262,6 +277,16 @@ private:
     std::thread m_workerThread;
     std::atomic<bool> m_stopRequested{false};
     std::atomic<bool> m_stopFlag{false};
+
+    // ============================================================================
+    // 实时流相关成员变量 (新增)
+    // ============================================================================
+    bool isRealtimeStreaming_ = false;
+    bool isRealtimePaused_ = false;
+    std::vector<int16_t> realtimeAudioBuffer_;
+    size_t accumulatedFrames_ = 0;
+    size_t targetPacketFrames_ = 0;  // 100ms对应的帧数
+    mutable std::mutex realtimeMutex_;
 };
 
 } // namespace Asr 
