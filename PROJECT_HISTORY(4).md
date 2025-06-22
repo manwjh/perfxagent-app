@@ -26,7 +26,8 @@ ai>> 建议的实现方案
 我建议创建一个新的控制器类，例如 RealtimeTranscriptionController，它将作为UI和底层服务（AudioManager, AsrManager）之间的桥梁。
 下面是它们之间交互的示意图：
 
-Pasted Graphic.png
+<img width="439" alt="Pasted Graphic" src="https://github.com/user-attachments/assets/f4000b62-9d2b-4c80-a872-8c863079a607" />
+
 
 在这个结构中：
 RealtimeAudioToTextWindow (UI层) 的职责是：
@@ -55,10 +56,12 @@ to_ai>> 实现菜单上的“音源选择”功能。
 - 我强迫症犯了，计划采用类似苹果镜像的界面方法整体修改界面。
 
 to_ai>> 能将整个界面的尺寸和总体做成类似的风格吗？
-image.png
+<img width="404" alt="Pasted Graphic 1" src="https://github.com/user-attachments/assets/29cd0e59-e56e-41fe-b172-541515097313" />
+
 - 我不知道它能理解多少。我没这样的指导能力，如果ai能借鉴，那就太好了。试试呗。
 - 我靠，它居然实现了，就是颜色太黄了。
-image.png
+<img width="398" alt="Pasted Graphic 2" src="https://github.com/user-attachments/assets/9e23f404-1acf-4f8c-a575-065f62d12c7b" />
+
 - 实验完成，让我们回到主线任务。
 
 ## <font color="blue">【本季的主要目标 2025/6/22 14:58】</font>
@@ -71,17 +74,22 @@ to_ai>> 按照附件要求，修改界面realtime_audio_to_text_window，并实�
 1.2 音源设备初始化成功，则在显示音源实时波形。
 2. 利用录音控制按钮，控制录音的开始/暂停，并实时显示本次录音的总长度。
 3. 点击“停止”，停止录音-->录音按钮回到开始状态-->保存文件-->通知用户。
+<img width="1453" alt="0017 50" src="https://github.com/user-attachments/assets/3b9cfac9-bc2a-43ce-8d0a-03bb9a524bc6" />
 
-image.png
+- 吓我一跳，一眼看去，大赞呀👍
+<img width="406" alt="0000 00" src="https://github.com/user-attachments/assets/a244d4dc-f521-4b2d-ae3e-5140577103d6" />
+
 - 虽然没有完全按照我的意图，但肯定超过我许多，包括时间。赞呀👍
 - 功能并没有按照预期进行，我觉得这就够了。可以继续工作。
-image.png
+<img width="406" alt="0000 00" src="https://github.com/user-attachments/assets/0356c531-311f-485a-ada6-910aa8f345ac" />
 
 ai>> Service Unavailable
 (Request ID: f694d0ec-e1ef-4261-8182-26a93e13ac07)
 - 到官网核实，确实如此。CURSOR平台挂掉了。
-- 检查VPN
+- 检查VPN，没问题
 - 我今天的任务能完成吗？♨️，看看网页
+  <img width="725" alt="Pasted Graphic 8" src="https://github.com/user-attachments/assets/a008987f-2394-4621-9553-01224e8c786f" />
+
 
 
 
