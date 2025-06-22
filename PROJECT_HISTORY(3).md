@@ -1,4 +1,5 @@
 # PerfXAgent-app 项目开发笔记（第三季）
+<img width="923" alt="image" src="https://github.com/user-attachments/assets/d669cb86-2b4c-4fe9-adb9-458364170e05" />
 
 ## <font color="blue">【本季的主要目标 2025/6/21 14:07】</font>
 1. 阅读和整理代码，方便后面工作的进行。如果不能理解现在的代码结构或者架构不清晰，后续的工作将会很复杂。
@@ -267,7 +268,6 @@ LRC和JSON文件都已正确保存到指定目录
 
 to_ai>> 将当前本机的版本定义为1.3.0.
 备注：完成录音文件到asr识别的过程，完成界面修改，实现界面流式显示，文字显示asr识别的音频包完整。
-
 然后
 将我的本地代码全部提交到github远程仓库，覆盖掉github的主线代码。绝对不允许影响我的本地代码，因为本地代码现在是最新的。
- 
+ <img width="794" alt="image" src="https://github.com/user-attachments/assets/c528aa93-15a1-4238-b9f0-93a33a2db270" />
