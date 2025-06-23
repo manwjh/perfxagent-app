@@ -170,7 +170,11 @@ to_ai>> 运行出错。
 [DEBUG] ASR streaming recognition started
 zsh: segmentation fault  ./bin/perfxagent-app
 
-- (忘了干了什么了，我被解决完美的流式输出体验给吸引了)
+- (忘了干了什么了，我被解决完美的流式输出体验给吸引了，不过界面改好了。忘了过程)
+<img width="438" alt="Pasted Graphic 7" src="https://github.com/user-attachments/assets/2eb759b4-e4bf-42db-8942-7d613d976e62" />
+<img width="446" alt="0000 00" src="https://github.com/user-attachments/assets/865e09f6-b5cd-471a-9e65-0593a71aee60" />
+<img width="429" alt="Pasted Graphic 6" src="https://github.com/user-attachments/assets/33a437ab-597d-459c-97a9-c4a3ccd9f4a8" />
+- 
 - ai提出了这种方式
 a>> ...
 1. 只显示“最终确定”的分句（definite=true）
@@ -231,6 +235,10 @@ definite=false 表示当前正在识别的分句，用于预览区。
 - 结束今天的工作。
 - 也结束本季。
 - 就这么滴。
+<img width="508" alt="image" src="https://github.com/user-attachments/assets/6dfcdf03-d827-463a-8040-11e575a42b97" />
+这个视频是本季过程代码，新的酒没有录了。
+https://www.youtube.com/shorts/RSnetYNAqog
+
 
 
 
