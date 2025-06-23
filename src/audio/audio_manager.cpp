@@ -54,10 +54,10 @@ public:
         std::cout << "[DEBUG] Entering AudioManager::initialize" << std::endl;
         config_ = config;
 
-        // 检查是否已经初始化
+        // **关键修复：如果已经初始化，先清理之前的资源**
         if (initialized_) {
-            std::cout << "[DEBUG] AudioManager::initialize: already initialized, returning true" << std::endl;
-            return true;
+            std::cout << "[DEBUG] AudioManager::initialize: already initialized, cleaning up first..." << std::endl;
+            cleanup();
         }
 
         // 1. 初始化 PortAudio 库
@@ -141,6 +141,12 @@ public:
         // 7. 标记初始化完成
         initialized_ = true;
         std::cout << "[DEBUG] Exiting AudioManager::initialize, result: success" << std::endl;
+
+        if (device_) {
+            device_->setErrorCallback([this](const std::string& errorMsg) {
+                if (onError_) onError_(errorMsg);
+            });
+        }
         return true;
     }
 
@@ -386,11 +392,15 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         
         if (!initialized_) {
+            std::cout << "[DEBUG] AudioManager::cleanup: already cleaned up, skipping" << std::endl;
             return;
         }
         
+        std::cout << "[DEBUG] AudioManager::cleanup: starting cleanup..." << std::endl;
+        
         // 停止音频流
         if (device_ && device_->isStreamActive()) {
+            std::cout << "[DEBUG] Stopping active audio stream..." << std::endl;
             device_->stopStream();
         }
         
@@ -610,6 +620,8 @@ public:
         externalAudioCallback_ = callback;
     }
 
+    void setOnError(std::function<void(const std::string&)> cb) { onError_ = std::move(cb); }
+
 private:
     // 私有辅助方法
     bool writeWavHeader(const std::string& filename, const WavHeader& header) {
@@ -809,10 +821,15 @@ private:
     
     // 外部音频回调
     std::function<void(const void*, void*, size_t)> externalAudioCallback_;
+    std::function<void(const std::string&)> onError_;
 };
 
 // AudioManager构造函数和析构函数
-AudioManager::AudioManager() : impl_(std::make_unique<Impl>()) {}
+AudioManager::AudioManager() : impl_(std::make_unique<Impl>()) {
+    impl_->setOnError([this](const std::string& err) {
+        emitError(QString::fromStdString(err));
+    });
+}
 
 AudioManager::~AudioManager() = default;
 
@@ -937,6 +954,10 @@ bool AudioManager::resumeRecording() {
 
 bool AudioManager::startStreamRecording(const std::string& outputFile) {
     return impl_->startStreamRecording(outputFile);
+}
+
+bool AudioManager::stopStreamRecording() {
+    return impl_->stopStreamRecording();
 }
 
 size_t AudioManager::getRecordedBytes() const {

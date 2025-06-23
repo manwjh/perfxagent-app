@@ -10,6 +10,7 @@
 #include <sstream>
 #include <mutex>
 #include <iostream>
+#include <functional>
 
 namespace perfx {
 namespace audio {
@@ -41,7 +42,7 @@ public:
      * @brief 构造函数
      * @details 初始化PortAudio库，如果初始化失败则抛出异常
      */
-    Impl() : stream_(nullptr, closeStream), callback_(nullptr) {
+    Impl() : errorCallback_(nullptr), stream_(nullptr, closeStream), callback_(nullptr) {
         PaError err = Pa_Initialize();
         if (err != paNoError) {
             lastError_ = "Failed to initialize PortAudio: " + std::string(Pa_GetErrorText(err));
@@ -119,8 +120,8 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         try {
             if (stream_) {
-                lastError_ = "Device is already open";
-                return false;
+                std::cout << "[DEBUG] Device already open, closing current device first..." << std::endl;
+                closeDevice();
             }
 
             // 验证设备
@@ -366,6 +367,13 @@ public:
         return lastError_;
     }
 
+    //--------------------------------------------------------------------------
+    // 新增成员
+    //--------------------------------------------------------------------------
+
+    using ErrorCallback = std::function<void(const std::string&)>;
+    ErrorCallback errorCallback_;
+
 private:
     //--------------------------------------------------------------------------
     // 私有辅助函数
@@ -377,10 +385,20 @@ private:
      */
     static int streamCallback(const void* input, void* output,
                             unsigned long frameCount,
-                            [[maybe_unused]] const PaStreamCallbackTimeInfo* timeInfo,
-                            [[maybe_unused]] PaStreamCallbackFlags statusFlags,
+                            const PaStreamCallbackTimeInfo* /*timeInfo*/,
+                            PaStreamCallbackFlags statusFlags,
                             void* userData) {
         auto* impl = static_cast<Impl*>(userData);
+        // 检查设备断开或异常
+        if ((statusFlags & paInputUnderflow) || (statusFlags & paInputOverflow) ||
+            (statusFlags & paOutputUnderflow) || (statusFlags & paOutputOverflow) ||
+            input == nullptr) {
+            impl->lastError_ = "Audio device disconnected or error occurred during streaming";
+            if (impl->errorCallback_) {
+                impl->errorCallback_(impl->lastError_);
+            }
+            return paAbort; // 终止流
+        }
         if (impl->callback_) {
             impl->callback_(input, output, frameCount);
         }
@@ -439,6 +457,10 @@ AudioConfig AudioDevice::getCurrentConfig() const { return impl_->getCurrentConf
 bool AudioDevice::isDeviceOpen() const { return impl_->isDeviceOpen(); }
 DeviceInfo AudioDevice::getCurrentDevice() const { return impl_->getCurrentDevice(); }
 std::string AudioDevice::getLastError() const { return impl_->getLastError(); }
+
+void AudioDevice::setErrorCallback(ErrorCallback cb) {
+    impl_->errorCallback_ = std::move(cb);
+}
 
 //==============================================================================
 // 其他相关类实现

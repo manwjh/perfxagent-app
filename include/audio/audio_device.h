@@ -13,6 +13,7 @@ namespace audio {
 class AudioDevice {
 public:
     using AudioCallback = std::function<void(const void* input, void* output, size_t frameCount)>;
+    using ErrorCallback = std::function<void(const std::string&)>;
 
     AudioDevice();
     ~AudioDevice();
@@ -51,6 +52,8 @@ public:
     bool isDeviceOpen() const;
     DeviceInfo getCurrentDevice() const;
     std::string getLastError() const;
+
+    void setErrorCallback(ErrorCallback cb);
 
 private:
     class Impl;

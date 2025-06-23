@@ -171,6 +171,8 @@ bool AsrClient::connect() {
 
 void AsrClient::disconnect() {
     if (m_connected) {
+        // 禁用自动重连，避免程序关闭时的重连错误
+        m_webSocket.disableAutomaticReconnection();
         m_webSocket.stop();
         m_connected = false;
     }
@@ -220,7 +222,7 @@ bool AsrClient::sendAudio(const std::vector<uint8_t>& audioData, int32_t sequenc
 #if ASR_ENABLE_PROTOCOL_LOG
     std::stringstream debugInfo;
     debugInfo << "==== 发送音频包 seq=" << sequence << " ====" << std::endl;
-    debugInfo << "HEADER: " << hexString(packet) << std::endl;
+    //debugInfo << "HEADER: " << hexString(packet) << std::endl;
     debugInfo << "PAYLOAD_LEN: " << hexString(std::vector<uint8_t>(packet.begin() + 8, packet.begin() + 12)) << std::endl;
     debugInfo << "PAYLOAD_HEAD: ";
     for (size_t i = 12; i < 32 && i < packet.size(); ++i) {

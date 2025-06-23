@@ -14,6 +14,8 @@ namespace ui {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
+    , currentAudioToTextWindow_(nullptr)
+    , currentRealtimeAudioToTextWindow_(nullptr)
 {
     // Make the window frameless and transparent
     setWindowFlags(Qt::FramelessWindowHint);
@@ -31,7 +33,7 @@ void MainWindow::setupUi() {
     centralWidget->setObjectName("centralWidget");
     centralWidget->setStyleSheet(
         "#centralWidget {"
-        "  background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #FDEB71, stop: 1 #F8D800);"
+        "  background-color: #FF8C00;"
         "  border-radius: 30px;"
         "}"
     );
@@ -93,15 +95,48 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void MainWindow::openAudioToTextWindow() {
-    AudioToTextWindow* window = new AudioToTextWindow(this);
-    window->setAttribute(Qt::WA_DeleteOnClose);
-    window->show();
+    // Check if any sub window is currently open
+    if (currentAudioToTextWindow_ || currentRealtimeAudioToTextWindow_) {
+        // If a sub window is still open, don't allow switching
+        // You could show a message to the user here if needed
+        return;
+    }
+    
+    currentAudioToTextWindow_ = new AudioToTextWindow(this);
+    currentAudioToTextWindow_->setAttribute(Qt::WA_DeleteOnClose);
+    
+    // Connect the window's destroyed signal to reset our pointer
+    connect(currentAudioToTextWindow_, &AudioToTextWindow::destroyed, 
+            this, &MainWindow::onSubWindowClosed);
+    
+    currentAudioToTextWindow_->show();
 }
 
 void MainWindow::openRealtimeAudioToTextWindow() {
-    RealtimeAudioToTextWindow* window = new RealtimeAudioToTextWindow(this);
-    window->setAttribute(Qt::WA_DeleteOnClose);
-    window->show();
+    // Check if any sub window is currently open
+    if (currentAudioToTextWindow_ || currentRealtimeAudioToTextWindow_) {
+        // If a sub window is still open, don't allow switching
+        // You could show a message to the user here if needed
+        return;
+    }
+    
+    currentRealtimeAudioToTextWindow_ = new RealtimeAudioToTextWindow(this);
+    currentRealtimeAudioToTextWindow_->setAttribute(Qt::WA_DeleteOnClose);
+    
+    // Connect the window's destroyed signal to reset our pointer
+    connect(currentRealtimeAudioToTextWindow_, &RealtimeAudioToTextWindow::destroyed, 
+            this, &MainWindow::onSubWindowClosed);
+    
+    currentRealtimeAudioToTextWindow_->show();
+}
+
+void MainWindow::onSubWindowClosed() {
+    // Reset pointers when sub windows are closed
+    if (sender() == currentAudioToTextWindow_) {
+        currentAudioToTextWindow_ = nullptr;
+    } else if (sender() == currentRealtimeAudioToTextWindow_) {
+        currentRealtimeAudioToTextWindow_ = nullptr;
+    }
 }
 
 MainWindow::~MainWindow() = default;

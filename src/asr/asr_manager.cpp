@@ -205,8 +205,12 @@ bool AsrManager::connect() {
 }
 
 void AsrManager::disconnect() {
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 开始断开 ASR 连接...");
     if (m_client) {
         m_client->disconnect();
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR 客户端已断开");
+    } else {
+        logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ ASR 客户端不存在，无需断开");
     }
     updateStatus(AsrStatus::DISCONNECTED);
     logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 ASR 连接已断开");

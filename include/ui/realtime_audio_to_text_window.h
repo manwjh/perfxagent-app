@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <memory>
+#include <QMap>
 
 // Forward declarations
 class QCloseEvent;
@@ -66,7 +67,6 @@ private:
     void updateRecordingButtons();
     void updateStatusBar(const QString& message);
     void clearTranscription();
-    void saveRecordingDialog();
 
     // UI Elements
     QTextEdit* textEdit_;
@@ -91,6 +91,8 @@ private:
     QString cumulativeText_;
     QString partialText_;
     QString lastSavedDirectory_;
+    QMap<int, QString> sentenceMap_;
+    QStringList finalLines_;
 };
 
 } // namespace ui

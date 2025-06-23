@@ -8,6 +8,9 @@
 namespace perfx {
 namespace ui {
 
+class AudioToTextWindow;
+class RealtimeAudioToTextWindow;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -24,9 +27,12 @@ private:
 private slots:
     void openAudioToTextWindow();
     void openRealtimeAudioToTextWindow();
+    void onSubWindowClosed();
     
 private:
     QPoint dragPosition_;
+    AudioToTextWindow* currentAudioToTextWindow_;
+    RealtimeAudioToTextWindow* currentRealtimeAudioToTextWindow_;
 };
 
 } // namespace ui

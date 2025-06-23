@@ -33,7 +33,7 @@ enum AsrLogLevel {
 // 主调试模式开关
 // 启用后：日志级别设为DEBUG，启用所有调试开关
 // 禁用时：日志级别设为INFO，禁用所有调试开关
- #define ASR_DEBUG_MODE
+// #define ASR_DEBUG_MODE
 
 // 日志级别控制
 #ifdef ASR_DEBUG_MODE

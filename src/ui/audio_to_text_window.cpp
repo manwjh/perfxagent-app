@@ -68,7 +68,7 @@ public:
             }
             
             QJsonObject obj = doc.object();
-            std::cout << "[DEBUG] JSON对象键: " << obj.keys().join(", ").toStdString() << std::endl;
+            //std::cout << "[DEBUG] JSON对象键: " << obj.keys().join(", ").toStdString() << std::endl;
             
             if (!obj.contains("result")) {
                 std::cout << "[DEBUG] JSON对象不包含result字段" << std::endl;
@@ -76,7 +76,7 @@ public:
             }
 
             QJsonObject resultObj = obj["result"].toObject();
-            std::cout << "[DEBUG] result对象键: " << resultObj.keys().join(", ").toStdString() << std::endl;
+            //std::cout << "[DEBUG] result对象键: " << resultObj.keys().join(", ").toStdString() << std::endl;
             
             if (resultObj.contains("utterances") && resultObj["utterances"].isArray()) {
                 QStringList all_utterances;

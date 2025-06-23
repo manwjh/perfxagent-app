@@ -11,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QApplication>
 
 namespace perfx {
 namespace logic {
@@ -56,14 +57,38 @@ void RealtimeTranscriptionController::shutdown() {
         enableRealtimeAsr(false);
     }
     
+    // 确保ASR连接被正确断开
+    if (realtimeAsrManager_) {
+        std::cout << "[DEBUG] Disconnecting ASR manager..." << std::endl;
+        realtimeAsrManager_->disconnect();
+        std::cout << "[DEBUG] ASR manager disconnected." << std::endl;
+    }
+    
+    // 停止波形定时器
     if (waveformTimer_ && waveformTimer_->isActive()) {
         waveformTimer_->stop();
         std::cout << "[DEBUG] Waveform timer stopped." << std::endl;
     }
+    
+    // 清理音频管理器
     if (audioManager_) {
         audioManager_->cleanup();
         std::cout << "[DEBUG] Audio manager cleanup requested." << std::endl;
     }
+    
+    // 清理ASR回调
+    if (realtimeAsrCallback_) {
+        realtimeAsrCallback_.reset();
+        std::cout << "[DEBUG] ASR callback cleaned up." << std::endl;
+    }
+    
+    // 清理ASR管理器
+    if (realtimeAsrManager_) {
+        realtimeAsrManager_.reset();
+        std::cout << "[DEBUG] ASR manager cleaned up." << std::endl;
+    }
+    
+    std::cout << "[DEBUG] Controller shutdown completed." << std::endl;
 }
 
 void RealtimeTranscriptionController::refreshAudioDevices() {
@@ -127,6 +152,26 @@ void RealtimeTranscriptionController::selectAudioDevice(int deviceId) {
         std::cout << "[ERROR] Invalid device ID: " << deviceId << std::endl;
         emit deviceSelectionResult(false, QString("Invalid device ID: %1").arg(deviceId));
         return;
+    }
+    
+    // **关键修复：在切换设备前先清理之前的设备状态**
+    std::cout << "[DEBUG] Cleaning up previous audio device state..." << std::endl;
+    
+    // 1. 停止波形更新定时器
+    if (waveformTimer_) {
+        waveformTimer_->stop();
+        std::cout << "[DEBUG] Waveform timer stopped" << std::endl;
+    }
+    
+    // 2. 清理之前的音频管理器状态
+    if (audioManager_) {
+        // 停止当前的音频流
+        audioManager_->stopStreamRecording();
+        std::cout << "[DEBUG] Previous audio stream stopped" << std::endl;
+        
+        // 清理音频管理器
+        audioManager_->cleanup();
+        std::cout << "[DEBUG] Audio manager cleaned up" << std::endl;
     }
     
     selectedDeviceId_ = deviceId;
@@ -349,8 +394,11 @@ void RealtimeTranscriptionController::saveRecordingFiles() {
         return;
     }
     
+    // 使用QApplication::activeWindow()作为父窗口，而不是nullptr
+    QWidget* parentWindow = QApplication::activeWindow();
+    
     // 让用户选择保存目录
-    QString saveDir = QFileDialog::getExistingDirectory(nullptr, "选择保存目录", QDir::homePath());
+    QString saveDir = QFileDialog::getExistingDirectory(parentWindow, "选择保存目录", QDir::homePath());
     if (saveDir.isEmpty()) {
         std::cout << "[INFO] User cancelled file save" << std::endl;
         return;
@@ -366,7 +414,7 @@ void RealtimeTranscriptionController::saveRecordingFiles() {
     if (!dir.exists(workDir)) {
         if (!dir.mkpath(workDir)) {
             std::cout << "[ERROR] Failed to create work directory: " << workDir.toStdString() << std::endl;
-            QMessageBox::critical(nullptr, "错误", "无法创建工作目录");
+            QMessageBox::critical(parentWindow, "错误", "无法创建工作目录");
             return;
         }
     }
@@ -383,10 +431,16 @@ void RealtimeTranscriptionController::saveRecordingFiles() {
             std::cout << "[INFO] WAV file saved: " << wavFilePath.toStdString() << std::endl;
         } else {
             std::cout << "[ERROR] Failed to copy WAV file" << std::endl;
+            QMessageBox::critical(parentWindow, "错误", "无法复制录音文件");
+            return;
         }
+    } else {
+        std::cout << "[ERROR] Temporary WAV file does not exist: " << tempWavFilePath_.toStdString() << std::endl;
+        QMessageBox::critical(parentWindow, "错误", "临时录音文件不存在");
+        return;
     }
     
-    // 创建文本文件（如果有转录内容）
+    // 创建文本文件（包含转录内容）
     QFile txtFile(txtFilePath);
     if (txtFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&txtFile);
@@ -396,15 +450,23 @@ void RealtimeTranscriptionController::saveRecordingFiles() {
         out << "录音时长: " << QString::number(getRecordingDuration(), 'f', 2) << " 秒\n";
         out << "文件大小: " << QString::number(getRecordedBytes()) << " 字节\n\n";
         
-        // 这里可以添加转录文本内容
+        // 保存实际的转录内容
         out << "转录内容:\n";
-        out << "[实时转录功能待实现]\n";
+        QString transcriptionText = getCumulativeTranscriptionText();
+        if (!transcriptionText.isEmpty()) {
+            out << transcriptionText;
+        } else {
+            out << "[无转录内容]";
+        }
         
         txtFile.close();
         std::cout << "[INFO] Text file saved: " << txtFilePath.toStdString() << std::endl;
+    } else {
+        std::cout << "[ERROR] Failed to create text file: " << txtFilePath.toStdString() << std::endl;
+        QMessageBox::warning(parentWindow, "警告", "无法创建文本文件，但录音文件已保存");
     }
     
-    QMessageBox::information(nullptr, "保存成功", 
+    QMessageBox::information(parentWindow, "保存成功", 
                            QString("录音文件已保存到:\n%1\n%2").arg(wavFilePath).arg(txtFilePath));
 }
 
@@ -436,7 +498,7 @@ void RealtimeAsrCallback::onClose(Asr::AsrClient* client) {
 void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& message) {
     (void)client; // 未使用
     
-    std::cout << "[DEBUG] ASR message received: " << message << std::endl;
+//    std::cout << "[DEBUG] ASR message received: " << message << std::endl;
     
     if (!controller_) {
         return;
@@ -469,11 +531,23 @@ void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
                 if (!text.isEmpty()) all_utterances.append(text);
             }
             QString finalText = all_utterances.join('\n');
+            
+            // 累积转录文本
+            if (!finalText.isEmpty()) {
+                controller_->setCumulativeTranscriptionText(finalText);
+            }
+            
             emit controller_->asrTranscriptionUpdated(finalText, true); // 最终结果
             std::cout << "[DEBUG] 提取到utterances文本: " << finalText.toStdString() << std::endl;
         } else if (resultObj.contains("text")) {
             QString text = resultObj["text"].toString();
             bool isFinal = resultObj.contains("is_final") ? resultObj.value("is_final").toBool() : false;
+            
+            // 如果是最终结果，累积转录文本
+            if (isFinal && !text.isEmpty()) {
+                controller_->setCumulativeTranscriptionText(text);
+            }
+            
             std::cout << "[DEBUG] 提取到text: " << text.toStdString() << ", isFinal: " << isFinal << std::endl;
             emit controller_->asrTranscriptionUpdated(text, isFinal);
         }
@@ -501,28 +575,40 @@ void RealtimeTranscriptionController::enableRealtimeAsr(bool enable) {
     std::cout << "[DEBUG] Realtime ASR enabled: " << (enable ? "true" : "false") << std::endl;
     
     if (enable && realtimeAsrManager_) {
-        // **关键修复：根据项目历史文档配置正确的音频格式**
-        // 对于实时流，应该使用pcm格式，因为发送的是原始PCM数据
+        // **关键修复：配置正确的音频格式和连接参数**
         Asr::AsrConfig asrConfig = realtimeAsrManager_->getConfig();
         asrConfig.sampleRate = 16000;
         asrConfig.channels = 1;
-        asrConfig.format = "pcm"; // **修复：实时流使用pcm格式，发送原始PCM数据**
-        asrConfig.codec = "raw";  // **修复：编码格式为raw(pcm)**
+        asrConfig.format = "pcm";  // 实时流使用pcm格式
+        asrConfig.codec = "raw";   // 编码格式为raw(pcm)
         asrConfig.streaming = true;
         asrConfig.segDuration = 100;  // 100ms分包
+        asrConfig.enableBusinessLog = true;  // 启用业务日志
+        asrConfig.enableFlowLog = true;      // 启用流程日志
         realtimeAsrManager_->setConfig(asrConfig);
+        
+        // **关键修复：确保先连接再启动识别**
+        if (!realtimeAsrManager_->connect()) {
+            std::cerr << "[ERROR] Failed to connect to ASR service" << std::endl;
+            emit asrError("Failed to connect to ASR service");
+            return;
+        }
         
         // 启动流式识别会话
         if (realtimeAsrManager_->startRecognition()) {
             std::cout << "[DEBUG] ASR streaming recognition started" << std::endl;
+            emit asrConnectionStatusChanged(true);
         } else {
             std::cerr << "[ERROR] Failed to start ASR streaming recognition" << std::endl;
             emit asrError("Failed to start ASR streaming recognition");
+            realtimeAsrManager_->disconnect();
         }
     } else if (!enable && realtimeAsrManager_) {
         // 停止流式识别
         realtimeAsrManager_->stopRecognition();
+        realtimeAsrManager_->disconnect();
         std::cout << "[DEBUG] ASR streaming recognition stopped" << std::endl;
+        emit asrConnectionStatusChanged(false);
     }
 }
 
@@ -537,7 +623,13 @@ void RealtimeTranscriptionController::processAsrAudio(const void* data, size_t f
         return;
     }
     
-    std::cout << "[DEBUG] processAsrAudio called with " << frameCount << " frames" << std::endl;
+    // 检查ASR连接状态
+    if (!realtimeAsrManager_->isConnected()) {
+        std::cout << "[DEBUG] ASR not connected, skipping audio processing" << std::endl;
+        return;
+    }
+    
+//    std::cout << "[DEBUG] processAsrAudio called with " << frameCount << " frames" << std::endl;
     
     // 累积音频数据
     const int16_t* samples = static_cast<const int16_t*>(data);
@@ -546,7 +638,7 @@ void RealtimeTranscriptionController::processAsrAudio(const void* data, size_t f
     std::memcpy(asrAudioBuffer_.data() + oldSize, samples, frameCount * sizeof(int16_t));
     asrBufferSize_ += frameCount;
     
-    std::cout << "[DEBUG] Audio buffer size: " << asrBufferSize_ << " frames, target: " << ASR_PACKET_SIZE << " frames" << std::endl;
+//    std::cout << "[DEBUG] Audio buffer size: " << asrBufferSize_ << " frames, target: " << ASR_PACKET_SIZE << " frames" << std::endl;
     
     // 检查是否有完整的100ms包
     while (asrBufferSize_ >= ASR_PACKET_SIZE) {
@@ -566,7 +658,7 @@ void RealtimeTranscriptionController::processAsrAudio(const void* data, size_t f
                              asrAudioBuffer_.begin() + ASR_PACKET_SIZE * sizeof(int16_t));
         asrBufferSize_ -= ASR_PACKET_SIZE;
         
-        std::cout << "[DEBUG] Sent ASR packet, remaining buffer: " << asrBufferSize_ << " frames" << std::endl;
+        //std::cout << "[DEBUG] Sent ASR packet, remaining buffer: " << asrBufferSize_ << " frames" << std::endl;
     }
 }
 

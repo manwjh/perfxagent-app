@@ -25,6 +25,8 @@
 #include <QLabel>
 #include <QCloseEvent>
 #include <iostream>
+#include <QRegularExpression>
+#include <QMap>
 
 namespace perfx {
 namespace ui {
@@ -117,8 +119,14 @@ RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
 }
 
 RealtimeAudioToTextWindow::~RealtimeAudioToTextWindow() {
-    // 确保在窗口销毁时，控制器被正确关闭，从而释放音频设备。
     if (controller_) {
+        // 1. 如果正在录音，先停掉录音
+        if (controller_->isRecording()) {
+            controller_->stopRecording();
+        }
+        // 2. 关闭ASR（如果在用）
+        controller_->enableRealtimeAsr(false);
+        // 3. 再 shutdown
         controller_->shutdown();
     }
     std::cout << "[UI] RealtimeAudioToTextWindow destroyed." << std::endl;
@@ -148,6 +156,16 @@ void RealtimeAudioToTextWindow::setupUI() {
         "   font-size: 16px;"
         "}"
     );
+    
+    // 性能优化设置
+    textEdit_->setLineWrapMode(QTextEdit::WidgetWidth);
+    textEdit_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    textEdit_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    
+    // 减少重绘频率，提高性能
+    textEdit_->document()->setMaximumBlockCount(1000); // 限制最大行数
+    textEdit_->setUpdatesEnabled(true);
+    
     mainLayout_->addWidget(textEdit_, 1);
 
     mainLayout_->setStretch(0, 5);
@@ -271,13 +289,13 @@ void RealtimeAudioToTextWindow::connectSignals() {
             this, &RealtimeAudioToTextWindow::updateWaveform);
             
     connect(controller_.get(), &logic::RealtimeTranscriptionController::asrTranscriptionUpdated,
-            this, &RealtimeAudioToTextWindow::onAsrTranscriptionUpdated);
+            this, &RealtimeAudioToTextWindow::onAsrTranscriptionUpdated, Qt::QueuedConnection);
             
     connect(controller_.get(), &logic::RealtimeTranscriptionController::asrError,
-            this, &RealtimeAudioToTextWindow::onAsrError);
+            this, &RealtimeAudioToTextWindow::onAsrError, Qt::QueuedConnection);
             
     connect(controller_.get(), &logic::RealtimeTranscriptionController::asrConnectionStatusChanged,
-            this, &RealtimeAudioToTextWindow::onAsrConnectionStatusChanged);
+            this, &RealtimeAudioToTextWindow::onAsrConnectionStatusChanged, Qt::QueuedConnection);
 
     connect(timer_, &QTimer::timeout, this, &RealtimeAudioToTextWindow::updateTimerDisplay);
 }
@@ -337,8 +355,6 @@ void RealtimeAudioToTextWindow::stopRecording() {
     updateStatusBar("Recording stopped. Ready.");
     updateRecordingButtons();
     
-    saveRecordingDialog();
-    
     // 清空UI和控制器状态
     clearTranscription();
     
@@ -364,6 +380,7 @@ void RealtimeAudioToTextWindow::clearText() {
     textEdit_->clear();
     cumulativeText_.clear();
     partialText_.clear();
+    finalLines_.clear();
 }
 
 void RealtimeAudioToTextWindow::downloadText() {
@@ -412,17 +429,21 @@ void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
 
         if (res == QMessageBox::Yes) {
             stopRecording(); // This will trigger the save dialog etc.
+            // 关闭ASR
+            if (controller_) controller_->enableRealtimeAsr(false);
             event->accept();
         } else if (res == QMessageBox::No) {
             // User wants to discard the recording.
-            // We just need to accept the event, the shutdown logic in the destructor
-            // will handle the resource cleanup.
+            // 关闭ASR
+            if (controller_) controller_->enableRealtimeAsr(false);
             event->accept();
         } else {
             // User cancelled the close operation.
             event->ignore();
         }
     } else {
+        // 关闭ASR
+        if (controller_) controller_->enableRealtimeAsr(false);
         event->accept(); // Not recording, close normally.
     }
 }
@@ -431,15 +452,36 @@ void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
 // 实时ASR槽函数实现 (新增)
 // ============================================================================
 
+// 新增：最终句存储
+QStringList finalLines_;
+
 void RealtimeAudioToTextWindow::onAsrTranscriptionUpdated(const QString& text, bool isFinal) {
-    if (isFinal) {
-        cumulativeText_.append(text + " ");
+    if (!textEdit_) return;
+    if (text.isEmpty()) return;
+    // 简单启发式：如果包含多个换行，视为 utterances
+    bool isUtterances = text.contains("\n");
+    if (isUtterances) {
+        cumulativeText_ = text;
         partialText_.clear();
     } else {
-        partialText_ = text;
+        if (isFinal) {
+            // 只在 cumulativeText_ 结尾不是 text 时才追加，防止重复
+            if (!cumulativeText_.endsWith(text)) {
+                if (!cumulativeText_.isEmpty()) cumulativeText_ += "\n";
+                cumulativeText_ += text;
+            }
+            partialText_.clear();
+        } else {
+            partialText_ = text;
+        }
     }
-    textEdit_->setPlainText(cumulativeText_ + partialText_);
-    textEdit_->moveCursor(QTextCursor::End);
+    QString displayText = cumulativeText_;
+    if (!partialText_.isEmpty()) displayText += partialText_;
+    textEdit_->setPlainText(displayText);
+    QTextCursor cursor = textEdit_->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    textEdit_->setTextCursor(cursor);
+    textEdit_->ensureCursorVisible();
 }
 
 void RealtimeAudioToTextWindow::onAsrError(const QString& error) {
@@ -477,31 +519,13 @@ void RealtimeAudioToTextWindow::updateWaveform(const QVector<float>& samples) {
 
 void RealtimeAudioToTextWindow::clearTranscription() {
     textEdit_->clear();
+    cumulativeText_.clear();
+    partialText_.clear();
+    finalLines_.clear();
 }
 
 void RealtimeAudioToTextWindow::saveRecording() {
     // This method can be implemented if needed. For now, it's just a placeholder.
-}
-
-void RealtimeAudioToTextWindow::saveRecordingDialog()
-{
-    if (lastSavedDirectory_.isEmpty()) {
-        lastSavedDirectory_ = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    }
-
-    QString defaultFileName = "perfxagent_recording_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-    QString fileName = QFileDialog::getSaveFileName(this, "Save Recording",
-                                                    lastSavedDirectory_ + "/" + defaultFileName,
-                                                    "WAV files (*.wav);;All files (*.*)");
-
-    if (!fileName.isEmpty()) {
-        lastSavedDirectory_ = QFileInfo(fileName).absolutePath();
-        // 暂时注释掉，因为控制器可能没有这个方法
-        // controller_->saveRecordingToFile(fileName);
-        QMessageBox::information(this, "Success", "Recording saved to:\n" + fileName);
-    } else {
-        QMessageBox::information(this, "Cancelled", "Save operation was cancelled.");
-    }
 }
 
 } // namespace ui

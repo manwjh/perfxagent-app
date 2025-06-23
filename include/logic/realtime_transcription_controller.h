@@ -61,9 +61,16 @@ public:
     void pauseRecording();
     void resumeRecording();
 
+    // 新增：判断是否正在录音
+    bool isRecording() const { return isRecording_; }
+
     // 实时ASR控制 (新增)
     void enableRealtimeAsr(bool enable);
     bool isRealtimeAsrEnabled() const { return realtimeAsrEnabled_; }
+    
+    // 转录文本管理
+    void setCumulativeTranscriptionText(const QString& text) { cumulativeTranscriptionText_ = text; }
+    QString getCumulativeTranscriptionText() const { return cumulativeTranscriptionText_; }
 
 signals:
     void audioDeviceListUpdated(const QStringList& deviceNames, const QList<int>& deviceIds);
@@ -113,6 +120,9 @@ private:
     std::vector<uint8_t> asrAudioBuffer_;
     size_t asrBufferSize_ = 0;
     static constexpr size_t ASR_PACKET_SIZE = 16000 * 2 * 100 / 1000; // 100ms @ 16kHz INT16
+    
+    // 转录内容累积
+    QString cumulativeTranscriptionText_;  // 累积的转录文本
 };
 
 } // namespace logic
