@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QMainWindow>
+#include <QWidget>
 #include <QTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -31,12 +31,15 @@ namespace ui {
 
 class EnhancedAsrCallback;
 
-class AudioToTextWindow : public QMainWindow {
+class AudioToTextWindow : public QWidget {
     Q_OBJECT
 
 public:
     explicit AudioToTextWindow(QWidget *parent = nullptr);
     ~AudioToTextWindow() override;
+
+signals:
+    void backToMainMenuRequested();
 
 private slots:
     void importFile();
@@ -47,6 +50,7 @@ private slots:
     void onConversionComplete(const QString& outputFile);
     void onError(const QString& errorMessage);
     void onAsrFinished();
+    void backToMainMenu();
     
     // 音频播放控制槽函数
     void playAudio();

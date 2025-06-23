@@ -85,6 +85,7 @@ signals:
     void asrTranscriptionUpdated(const QString& text, bool isFinal);
     void asrConnectionStatusChanged(bool connected);
     void asrError(const QString& errorMessage);
+    void asrUtterancesUpdated(const QList<QVariantMap>& utterances);
 
 private slots:
     void onWaveformTimerTimeout();

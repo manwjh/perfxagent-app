@@ -8,14 +8,17 @@
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QStackedWidget>
 
 namespace perfx {
 namespace ui {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
-    , currentAudioToTextWindow_(nullptr)
-    , currentRealtimeAudioToTextWindow_(nullptr)
+    , stackedWidget_(nullptr)
+    , audioToTextWindow_(nullptr)
+    , realtimeAudioToTextWindow_(nullptr)
+    , mainMenuWidget_(nullptr)
 {
     // Make the window frameless and transparent
     setWindowFlags(Qt::FramelessWindowHint);
@@ -61,23 +64,53 @@ void MainWindow::setupUi() {
     connect(closeButton, &QPushButton::clicked, this, &MainWindow::close);
     connect(minimizeButton, &QPushButton::clicked, this, &MainWindow::showMinimized);
     
+    // Create stacked widget for different pages
+    stackedWidget_ = new QStackedWidget(this);
+    mainLayout->addWidget(stackedWidget_);
+    
+    // Create main menu page
+    createMainMenuPage();
+    
+    // Create sub-windows as pages
+    audioToTextWindow_ = new AudioToTextWindow(this);
+    realtimeAudioToTextWindow_ = new RealtimeAudioToTextWindow(this);
+    
+    // Add pages to stacked widget
+    stackedWidget_->addWidget(mainMenuWidget_);
+    stackedWidget_->addWidget(audioToTextWindow_);
+    stackedWidget_->addWidget(realtimeAudioToTextWindow_);
+    
+    // Connect back to main menu signals
+    connect(audioToTextWindow_, &AudioToTextWindow::backToMainMenuRequested, 
+            this, &MainWindow::switchToMainMenu);
+    connect(realtimeAudioToTextWindow_, &RealtimeAudioToTextWindow::backToMainMenuRequested, 
+            this, &MainWindow::switchToMainMenu);
+    
+    // Start with main menu
+    stackedWidget_->setCurrentWidget(mainMenuWidget_);
+}
+
+void MainWindow::createMainMenuPage() {
+    mainMenuWidget_ = new QWidget(this);
+    QVBoxLayout* mainMenuLayout = new QVBoxLayout(mainMenuWidget_);
+    mainMenuLayout->setContentsMargins(20, 10, 20, 20);
+
     // Grid for app icons
     QGridLayout* gridLayout = new QGridLayout();
-    mainLayout->addLayout(gridLayout);
-    mainLayout->setContentsMargins(20, 10, 20, 20);
+    mainMenuLayout->addLayout(gridLayout);
 
     // Create and add app icons
     AppIconButton* audioToTextBtn = new AppIconButton(
         style()->standardIcon(QStyle::SP_FileIcon), "文件转录", this);
-    connect(audioToTextBtn, &AppIconButton::clicked, this, &MainWindow::openAudioToTextWindow);
+    connect(audioToTextBtn, &AppIconButton::clicked, this, &MainWindow::switchToAudioToText);
     gridLayout->addWidget(audioToTextBtn, 0, 0, Qt::AlignTop);
     
     AppIconButton* realtimeAudioToTextBtn = new AppIconButton(
         style()->standardIcon(QStyle::SP_ComputerIcon), "实时转录", this);
-    connect(realtimeAudioToTextBtn, &AppIconButton::clicked, this, &MainWindow::openRealtimeAudioToTextWindow);
+    connect(realtimeAudioToTextBtn, &AppIconButton::clicked, this, &MainWindow::switchToRealtimeAudioToText);
     gridLayout->addWidget(realtimeAudioToTextBtn, 0, 1, Qt::AlignTop);
 
-    mainLayout->addStretch(); // Pushes icons to the top
+    mainMenuLayout->addStretch(); // Pushes icons to the top
 }
 
 void MainWindow::mousePressEvent(QMouseEvent *event) {
@@ -94,49 +127,16 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event) {
     }
 }
 
-void MainWindow::openAudioToTextWindow() {
-    // Check if any sub window is currently open
-    if (currentAudioToTextWindow_ || currentRealtimeAudioToTextWindow_) {
-        // If a sub window is still open, don't allow switching
-        // You could show a message to the user here if needed
-        return;
-    }
-    
-    currentAudioToTextWindow_ = new AudioToTextWindow(this);
-    currentAudioToTextWindow_->setAttribute(Qt::WA_DeleteOnClose);
-    
-    // Connect the window's destroyed signal to reset our pointer
-    connect(currentAudioToTextWindow_, &AudioToTextWindow::destroyed, 
-            this, &MainWindow::onSubWindowClosed);
-    
-    currentAudioToTextWindow_->show();
+void MainWindow::switchToAudioToText() {
+    stackedWidget_->setCurrentWidget(audioToTextWindow_);
 }
 
-void MainWindow::openRealtimeAudioToTextWindow() {
-    // Check if any sub window is currently open
-    if (currentAudioToTextWindow_ || currentRealtimeAudioToTextWindow_) {
-        // If a sub window is still open, don't allow switching
-        // You could show a message to the user here if needed
-        return;
-    }
-    
-    currentRealtimeAudioToTextWindow_ = new RealtimeAudioToTextWindow(this);
-    currentRealtimeAudioToTextWindow_->setAttribute(Qt::WA_DeleteOnClose);
-    
-    // Connect the window's destroyed signal to reset our pointer
-    connect(currentRealtimeAudioToTextWindow_, &RealtimeAudioToTextWindow::destroyed, 
-            this, &MainWindow::onSubWindowClosed);
-    
-    currentRealtimeAudioToTextWindow_->show();
+void MainWindow::switchToRealtimeAudioToText() {
+    stackedWidget_->setCurrentWidget(realtimeAudioToTextWindow_);
 }
 
-void MainWindow::onSubWindowClosed() {
-    // Reset pointers when sub windows are closed
-    if (sender() == currentAudioToTextWindow_) {
-        currentAudioToTextWindow_ = nullptr;
-    } else if (sender() == currentRealtimeAudioToTextWindow_) {
-        currentRealtimeAudioToTextWindow_ = nullptr;
-    }
+void MainWindow::switchToMainMenu() {
+    stackedWidget_->setCurrentWidget(mainMenuWidget_);
 }
 
 MainWindow::~MainWindow() = default;

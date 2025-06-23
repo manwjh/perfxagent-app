@@ -440,6 +440,10 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                     
                     // 尝试解析 JSON 获取 log_id 和检查最终响应
                     try {
+                        if (jsonResponse.empty()) {
+                            logWithTimestamp("⚠️ 收到空的JSON响应");
+                            break;
+                        }
                         json j = json::parse(jsonResponse);
                         if (j.contains("result") && j["result"].contains("additions") && 
                             j["result"]["additions"].contains("log_id")) {
@@ -479,10 +483,10 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                         }
                         
                     } catch (const std::exception& e) {
-                        // 不是 JSON 格式，忽略
+                        logWithTimestamp("⚠️ 解析Full Server Response失败: " + std::string(e.what()));
                     }
                     
-                    if (m_callback) {
+                    if (m_callback && !jsonResponse.empty()) {
                         m_callback->onMessage(this, jsonResponse);
                     }
                     
@@ -521,6 +525,10 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                 
                 // 尝试解析 JSON 获取 log_id 和检查最终响应
                 try {
+                    if (msg->str.empty()) {
+                        logWithTimestamp("⚠️ 收到空的文本消息");
+                        break;
+                    }
                     json j = json::parse(msg->str);
                     if (j.contains("result") && j["result"].contains("additions") && 
                         j["result"]["additions"].contains("log_id")) {
@@ -560,10 +568,10 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                     }
                     
                 } catch (const std::exception& e) {
-                    // 不是 JSON 格式，忽略
+                    logWithTimestamp("⚠️ 解析文本消息JSON失败: " + std::string(e.what()));
                 }
                 
-                if (m_callback) {
+                if (m_callback && !msg->str.empty()) {
                     m_callback->onMessage(this, msg->str);
                 }
                 
@@ -653,7 +661,8 @@ json AsrClient::constructRequest() const {
         }},
         {"request", {
             {"model_name", "bigmodel"},
-            {"enable_punc", true}
+            {"enable_punc", true},
+            {"vad_segment_duration", 800}
         }}
     };
     return req;

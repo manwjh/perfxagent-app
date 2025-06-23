@@ -39,7 +39,7 @@ brew install asio
 1. **克隆项目**
    ```bash
    git clone <repository-url>
-   cd perfxagent-app-1.0.1_已上传为1.2.0
+   cd perfxagent-app
    ```
 
 2. **创建构建目录**
@@ -172,7 +172,7 @@ cd examples/build
 
 ## 版本信息
 
-当前版本: 1.5.1
+当前版本: 1.6.1
 
 ## 许可证
 
@@ -184,4 +184,4 @@ cd examples/build
 
 ## 支持
 
-如果遇到问题，请查看 `docs/` 目录下的文档或提交Issue。 
+如果遇到问题，请查看 `docs/` 目录下的文档或提交Issue。

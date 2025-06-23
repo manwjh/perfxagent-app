@@ -27,6 +27,9 @@
 #include <iostream>
 #include <QRegularExpression>
 #include <QMap>
+#include <QIcon>
+#include <QPixmap>
+#include <QDebug>
 
 namespace perfx {
 namespace ui {
@@ -87,7 +90,7 @@ private:
 // 主窗口实现
 // =================================================================================
 RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
-    : QMainWindow(parent),
+    : QWidget(parent),
       textEdit_(nullptr),
       statusLabel_(nullptr),
       recordPauseButton_(nullptr),
@@ -113,7 +116,7 @@ RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
     setupStatusBar();
     setupBottomControls();
     connectSignals();
-    updateStatusBar("Ready - Select an audio source to begin.");
+    updateStatusBar("待机中 - 选择音频源开始录音");
     updateRecordingButtons();
     controller_->refreshAudioDevices();
 }
@@ -135,14 +138,23 @@ RealtimeAudioToTextWindow::~RealtimeAudioToTextWindow() {
 void RealtimeAudioToTextWindow::setupUI() {
     setWindowTitle("Real-time Transcription");
     resize(400, 700);
-    setStyleSheet("QMainWindow { background-color: #1E1E1E; }");
+    setStyleSheet("QWidget { background-color: #1E1E1E; }");
 
-    // Create central widget and main layout
-    QWidget* centralWidget = new QWidget(this);
-    setCentralWidget(centralWidget);
-    mainLayout_ = new QVBoxLayout(centralWidget);
+    mainLayout_ = new QVBoxLayout(this);
     mainLayout_->setSpacing(0);
     mainLayout_->setContentsMargins(10, 10, 10, 10);
+
+    // 伪菜单栏
+    QMenuBar* menuBar = new QMenuBar(this);
+    QMenu* fileMenu = menuBar->addMenu("文件");
+    QAction* clearAction = fileMenu->addAction("清空文本");
+    QAction* downloadAction = fileMenu->addAction("保存转写");
+    fileMenu->addSeparator();
+    QAction* exitAction = fileMenu->addAction("退出");
+    connect(clearAction, &QAction::triggered, this, &RealtimeAudioToTextWindow::clearText);
+    connect(downloadAction, &QAction::triggered, this, &RealtimeAudioToTextWindow::downloadText);
+    connect(exitAction, &QAction::triggered, this, &QWidget::close);
+    mainLayout_->addWidget(menuBar);
 
     // Create text display area
     textEdit_ = new QTextEdit(this);
@@ -168,40 +180,20 @@ void RealtimeAudioToTextWindow::setupUI() {
     
     mainLayout_->addWidget(textEdit_, 1);
 
-    mainLayout_->setStretch(0, 5);
-    mainLayout_->setStretch(1, 2);
-}
-
-void RealtimeAudioToTextWindow::setupMenuBar() {
-    QMenuBar* menuBar = this->menuBar();
-    menuBar->setStyleSheet("QMenuBar { background-color: #2E2E2E; color: #F0F0F0; } "
-                           "QMenu { background-color: #2E2E2E; color: #F0F0F0; }");
-    
-    // File Menu
-    QMenu* fileMenu = menuBar->addMenu("File");
-    
-    QAction* clearAction = new QAction("Clear Text", this);
-    connect(clearAction, &QAction::triggered, this, &RealtimeAudioToTextWindow::clearText);
-    fileMenu->addAction(clearAction);
-    
-    QAction* downloadAction = new QAction("Save Transcript", this);
-    connect(downloadAction, &QAction::triggered, this, &RealtimeAudioToTextWindow::downloadText);
-    fileMenu->addAction(downloadAction);
-    
-    fileMenu->addSeparator();
-    
-    QAction* exitAction = new QAction("Exit", this);
-    connect(exitAction, &QAction::triggered, this, &QWidget::close);
-    fileMenu->addAction(exitAction);
-}
-
-void RealtimeAudioToTextWindow::setupStatusBar() {
-    statusBar_ = new QStatusBar(this);
-    setStatusBar(statusBar_);
+    // 伪状态栏
+    QHBoxLayout* statusLayout = new QHBoxLayout();
     statusLabel_ = new QLabel("Ready", this);
-    statusBar_->setStyleSheet("QStatusBar { color: #d0d0d0; }");
-    statusBar_->addWidget(statusLabel_);
+    statusLabel_->setStyleSheet("QLabel { color: #d0d0d0; }");
+    statusLayout->addWidget(statusLabel_);
+    mainLayout_->addLayout(statusLayout);
+
+    mainLayout_->setStretch(0, 0); // menuBar
+    mainLayout_->setStretch(1, 5); // textEdit_
+    mainLayout_->setStretch(2, 0); // status bar
 }
+
+void RealtimeAudioToTextWindow::setupMenuBar() {}
+void RealtimeAudioToTextWindow::setupStatusBar() {}
 
 void RealtimeAudioToTextWindow::setupBottomControls() {
     QFrame* bottomFrame = new QFrame(this);
@@ -267,6 +259,12 @@ void RealtimeAudioToTextWindow::setupBottomControls() {
     stopButton_->setStyleSheet("QPushButton { color: #AAAAAA; background-color: transparent; border: none; font-size: 14px; }");
     controlsLayout->addWidget(stopButton_);
 
+    // Back to Main Menu Button
+    QPushButton* backButton = new QPushButton("返回", this);
+    backButton->setStyleSheet("QPushButton { color: #AAAAAA; background-color: transparent; border: none; font-size: 14px; }");
+    controlsLayout->addWidget(backButton);
+    connect(backButton, &QPushButton::clicked, this, &RealtimeAudioToTextWindow::backToMainMenu);
+
     bottomLayout->addLayout(controlsLayout);
     mainLayout_->addWidget(bottomFrame);
 }
@@ -297,6 +295,9 @@ void RealtimeAudioToTextWindow::connectSignals() {
     connect(controller_.get(), &logic::RealtimeTranscriptionController::asrConnectionStatusChanged,
             this, &RealtimeAudioToTextWindow::onAsrConnectionStatusChanged, Qt::QueuedConnection);
 
+    connect(controller_.get(), &logic::RealtimeTranscriptionController::asrUtterancesUpdated,
+            this, &RealtimeAudioToTextWindow::onAsrUtterancesUpdated);
+
     connect(timer_, &QTimer::timeout, this, &RealtimeAudioToTextWindow::updateTimerDisplay);
 }
 
@@ -308,7 +309,7 @@ void RealtimeAudioToTextWindow::toggleRecording() {
             isPaused_ = false;
             recordingStartTime_ = QDateTime::currentMSecsSinceEpoch();
             timer_->start(100); // Update timer every 100ms
-            updateStatusBar("Recording...");
+            updateStatusBar("录音中...");
             
             // 启动实时ASR
             if (controller_) {
@@ -320,7 +321,7 @@ void RealtimeAudioToTextWindow::toggleRecording() {
         isPaused_ = !isPaused_;
         if (isPaused_) {
             controller_->pauseRecording();
-            updateStatusBar("Paused");
+            updateStatusBar("录音已暂停");
             
             // 暂停时禁用实时ASR
             if (controller_) {
@@ -328,7 +329,7 @@ void RealtimeAudioToTextWindow::toggleRecording() {
             }
         } else {
             controller_->resumeRecording();
-            updateStatusBar("Recording...");
+            updateStatusBar("录音中...");
             
             // 恢复时重新启用实时ASR
             if (controller_) {
@@ -352,7 +353,7 @@ void RealtimeAudioToTextWindow::stopRecording() {
     isRecording_ = false;
     isPaused_ = false;
     timer_->stop();
-    updateStatusBar("Recording stopped. Ready.");
+    updateStatusBar("待机中 - 选择音频源开始录音");
     updateRecordingButtons();
     
     // 清空UI和控制器状态
@@ -368,12 +369,36 @@ void RealtimeAudioToTextWindow::updateRecordingButtons() {
     audioSourceComboBox_->setEnabled(!isRecording_);
 
     if (isRecordingAndNotPaused) {
+        // Recording state - show pause icon
         recordPauseButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPause));
-    } else {
+        recordPauseButton_->setToolTip("暂停录音");
+    } else if (isRecording_ && isPaused_) {
+        // Paused state - show play icon
         recordPauseButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+        recordPauseButton_->setToolTip("继续录音");
+    } else {
+        // Standby state - show red dot
+        recordPauseButton_->setIcon(createRedDotIcon());
+        recordPauseButton_->setToolTip("开始录音");
     }
+    
     // Adjust icon size if needed
     recordPauseButton_->setIconSize(QSize(35, 35));
+}
+
+QIcon RealtimeAudioToTextWindow::createRedDotIcon() {
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+    
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    
+    // Draw red circle
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(255, 0, 0));
+    painter.drawEllipse(8, 8, 16, 16);
+    
+    return QIcon(pixmap);
 }
 
 void RealtimeAudioToTextWindow::clearText() {
@@ -456,27 +481,18 @@ void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
 QStringList finalLines_;
 
 void RealtimeAudioToTextWindow::onAsrTranscriptionUpdated(const QString& text, bool isFinal) {
+    (void)isFinal;
     if (!textEdit_) return;
     if (text.isEmpty()) return;
-    // 简单启发式：如果包含多个换行，视为 utterances
-    bool isUtterances = text.contains("\n");
-    if (isUtterances) {
-        cumulativeText_ = text;
-        partialText_.clear();
-    } else {
-        if (isFinal) {
-            // 只在 cumulativeText_ 结尾不是 text 时才追加，防止重复
-            if (!cumulativeText_.endsWith(text)) {
-                if (!cumulativeText_.isEmpty()) cumulativeText_ += "\n";
-                cumulativeText_ += text;
-            }
-            partialText_.clear();
-        } else {
-            partialText_ = text;
-        }
+
+    // 目前 text 是多行字符串，无法区分 definite，全部视为 definite=true
+    finalLines_.clear();
+    QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+    for (const QString& line : lines) {
+        if (!line.isEmpty()) finalLines_ << line;
     }
-    QString displayText = cumulativeText_;
-    if (!partialText_.isEmpty()) displayText += partialText_;
+    // 预览区暂不处理（因无结构化数据）
+    QString displayText = finalLines_.join("\n");
     textEdit_->setPlainText(displayText);
     QTextCursor cursor = textEdit_->textCursor();
     cursor.movePosition(QTextCursor::End);
@@ -493,6 +509,46 @@ void RealtimeAudioToTextWindow::onAsrError(const QString& error) {
 void RealtimeAudioToTextWindow::onAsrConnectionStatusChanged(bool connected) {
     statusLabel_->setText(connected ? "ASR: Connected" : "ASR: Disconnected");
     statusLabel_->setStyleSheet(connected ? "color: green;" : "color: red;");
+}
+
+void RealtimeAudioToTextWindow::onAsrUtterancesUpdated(const QList<QVariantMap>& utterances) {
+    QStringList lines;
+    QString previewLine;
+
+    // 合并短句的最小长度
+    const int minLineLen = 6;
+
+    for (const auto& utter : utterances) {
+        if (utter["definite"].toBool()) {
+            QString txt = utter["text"].toString();
+            if (txt.length() < minLineLen && !lines.isEmpty()) {
+                // 合并到上一行
+                lines.last() += txt;
+            } else {
+                lines << txt;
+            }
+        } else {
+            // 预览区
+            QVariantList words = utter["words"].toList();
+            QStringList wordList;
+            for (const QVariant& w : words) {
+                wordList << w.toMap()["text"].toString();
+            }
+            previewLine = wordList.join("");
+        }
+    }
+
+    QString displayText = lines.join("<br>");
+    if (!previewLine.isEmpty()) {
+        displayText += "<span style='color:gray;font-style:italic'>" + previewLine + "</span>";
+    }
+    textEdit_->setHtml(displayText);
+
+    // 保持光标在末尾
+    QTextCursor cursor = textEdit_->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    textEdit_->setTextCursor(cursor);
+    textEdit_->ensureCursorVisible();
 }
 
 void RealtimeAudioToTextWindow::updateAudioDeviceList(const QStringList& names, const QList<int>& ids) {
@@ -526,6 +582,10 @@ void RealtimeAudioToTextWindow::clearTranscription() {
 
 void RealtimeAudioToTextWindow::saveRecording() {
     // This method can be implemented if needed. For now, it's just a placeholder.
+}
+
+void RealtimeAudioToTextWindow::backToMainMenu() {
+    emit backToMainMenuRequested();
 }
 
 } // namespace ui

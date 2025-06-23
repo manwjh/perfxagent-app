@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QStatusBar>
 #include <QMouseEvent>
+#include <QStackedWidget>
 
 namespace perfx {
 namespace ui {
@@ -23,16 +24,19 @@ protected:
 
 private:
     void setupUi();
+    void createMainMenuPage();
 
 private slots:
-    void openAudioToTextWindow();
-    void openRealtimeAudioToTextWindow();
-    void onSubWindowClosed();
+    void switchToAudioToText();
+    void switchToRealtimeAudioToText();
+    void switchToMainMenu();
     
 private:
     QPoint dragPosition_;
-    AudioToTextWindow* currentAudioToTextWindow_;
-    RealtimeAudioToTextWindow* currentRealtimeAudioToTextWindow_;
+    QStackedWidget* stackedWidget_;
+    AudioToTextWindow* audioToTextWindow_;
+    RealtimeAudioToTextWindow* realtimeAudioToTextWindow_;
+    QWidget* mainMenuWidget_;
 };
 
 } // namespace ui

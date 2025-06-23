@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QMainWindow>
+#include <QWidget>
 #include <memory>
 #include <QMap>
 
@@ -23,12 +23,15 @@ namespace ui {
 
 class WaveformWidget;
 
-class RealtimeAudioToTextWindow : public QMainWindow {
+class RealtimeAudioToTextWindow : public QWidget {
     Q_OBJECT
 
 public:
     explicit RealtimeAudioToTextWindow(QWidget *parent = nullptr);
     ~RealtimeAudioToTextWindow();
+
+    signals:
+    void backToMainMenuRequested();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -38,6 +41,7 @@ private slots:
     void toggleRecording();
     void stopRecording();
     void saveRecording();
+    void backToMainMenu();
     
     // UI updates
     void updateTimerDisplay();
@@ -52,6 +56,7 @@ private slots:
     void onAsrTranscriptionUpdated(const QString& text, bool isFinal);
     void onAsrError(const QString& error);
     void onAsrConnectionStatusChanged(bool connected);
+    void onAsrUtterancesUpdated(const QList<QVariantMap>& utterances);
     
     // Menu actions
     void clearText();
@@ -67,6 +72,7 @@ private:
     void updateRecordingButtons();
     void updateStatusBar(const QString& message);
     void clearTranscription();
+    QIcon createRedDotIcon();
 
     // UI Elements
     QTextEdit* textEdit_;

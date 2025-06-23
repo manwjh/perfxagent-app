@@ -525,20 +525,27 @@ void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
         
         // 使用与audio_to_text_window.cpp完全相同的逻辑
         if (resultObj.contains("utterances") && resultObj["utterances"].isArray()) {
-            QStringList all_utterances;
+            QList<QVariantMap> utterList;
             for (const auto& utteranceVal : resultObj["utterances"].toArray()) {
-                QString text = utteranceVal.toObject()["text"].toString();
-                if (!text.isEmpty()) all_utterances.append(text);
+                QJsonObject utterObj = utteranceVal.toObject();
+                QVariantMap map;
+                map["text"] = utterObj["text"].toString();
+                map["definite"] = utterObj["definite"].toBool();
+                map["start_time"] = utterObj["start_time"].toInt();
+                map["end_time"] = utterObj["end_time"].toInt();
+                // 保留 words 字段
+                if (utterObj.contains("words") && utterObj["words"].isArray()) {
+                    QVariantList wordList;
+                    for (const auto& wordVal : utterObj["words"].toArray()) {
+                        wordList.append(wordVal.toObject().toVariantMap());
+                    }
+                    map["words"] = wordList;
+                } else {
+                    map["words"] = QVariantList();
+                }
+                utterList.append(map);
             }
-            QString finalText = all_utterances.join('\n');
-            
-            // 累积转录文本
-            if (!finalText.isEmpty()) {
-                controller_->setCumulativeTranscriptionText(finalText);
-            }
-            
-            emit controller_->asrTranscriptionUpdated(finalText, true); // 最终结果
-            std::cout << "[DEBUG] 提取到utterances文本: " << finalText.toStdString() << std::endl;
+            emit controller_->asrUtterancesUpdated(utterList);
         } else if (resultObj.contains("text")) {
             QString text = resultObj["text"].toString();
             bool isFinal = resultObj.contains("is_final") ? resultObj.value("is_final").toBool() : false;

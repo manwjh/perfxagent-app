@@ -181,7 +181,7 @@ Q_SIGNALS:
 };
 
 AudioToTextWindow::AudioToTextWindow(QWidget *parent)
-    : QMainWindow(parent),
+    : QWidget(parent),
       textEdit_(nullptr),
       statusBar_(nullptr),
       statusLabel_(nullptr),
@@ -231,10 +231,7 @@ void AudioToTextWindow::setupUI()
     setWindowTitle("录音转文本");
     resize(800, 600);
 
-    // 创建中央部件
-    QWidget* centralWidget = new QWidget(this);
-    setCentralWidget(centralWidget);
-    QVBoxLayout* mainLayout = new QVBoxLayout(centralWidget);
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
 
     // 添加文本编辑区域
     textEdit_ = new QTextEdit(this);
@@ -249,13 +246,16 @@ void AudioToTextWindow::setupUI()
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     QPushButton* importButton = new QPushButton("导入文件", this);
     QPushButton* asrButton = new QPushButton("ASR转录", this);
+    QPushButton* backButton = new QPushButton("返回", this);
     buttonLayout->addWidget(importButton);
     buttonLayout->addWidget(asrButton);
+    buttonLayout->addWidget(backButton);
     mainLayout->addLayout(buttonLayout);
 
     // 连接信号和槽
     connect(importButton, &QPushButton::clicked, this, &AudioToTextWindow::importFile);
     connect(asrButton, &QPushButton::clicked, this, &AudioToTextWindow::asrTranscribe);
+    connect(backButton, &QPushButton::clicked, this, &AudioToTextWindow::backToMainMenu);
 
     // 连接信号
     connectSignals();
@@ -263,28 +263,14 @@ void AudioToTextWindow::setupUI()
 
 void AudioToTextWindow::setupMenuBar()
 {
-    QMenuBar* menuBar = new QMenuBar(this);
-    setMenuBar(menuBar);
-
-    // 文件菜单
-    QMenu* fileMenu = menuBar->addMenu("文件");
-    QAction* importAction = fileMenu->addAction("导入文件");
-    QAction* exitAction = fileMenu->addAction("退出");
-    connect(importAction, &QAction::triggered, this, &AudioToTextWindow::importFile);
-    connect(exitAction, &QAction::triggered, this, &QWidget::close);
-
-    // 设置菜单
-    QMenu* settingsMenu = menuBar->addMenu("设置");
-    QAction* apiKeyAction = settingsMenu->addAction("设置API密钥");
-    connect(apiKeyAction, &QAction::triggered, this, &AudioToTextWindow::setApiKey);
+    // 由于现在是QWidget，不再需要菜单栏
+    // 如果需要菜单功能，可以创建QMenu并添加到按钮上
 }
 
 void AudioToTextWindow::setupStatusBar()
 {
-    statusBar_ = new QStatusBar(this);
-    setStatusBar(statusBar_);
-    statusLabel_ = new QLabel("准备就绪", this);
-    statusBar_->addWidget(statusLabel_);
+    // 由于现在是QWidget，不再需要状态栏
+    // 状态信息可以显示在文本编辑器中或其他地方
 }
 
 void AudioToTextWindow::setupAudioPlayerControls()
@@ -766,8 +752,8 @@ void AudioToTextWindow::convertToWavFile(const std::string& inputFile, const std
 
 void AudioToTextWindow::updateStatusBar(const QString& message)
 {
-    if (statusBar_) {
-        statusLabel_->setText(message);
+    if (textEdit_) {
+        textEdit_->append("[状态] " + message);
     }
 }
 
@@ -787,6 +773,11 @@ QString AudioToTextWindow::formatTime(qint64 milliseconds)
         return QObject::tr("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
     }
     return QObject::tr("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
+}
+
+void AudioToTextWindow::backToMainMenu()
+{
+    emit backToMainMenuRequested();
 }
 
 } // namespace ui
