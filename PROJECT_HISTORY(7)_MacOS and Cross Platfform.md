@@ -29,6 +29,7 @@ DMG挂载测试: ✅ 成功
 你的PerfxAgent-ASR应用程序现在已经完全准备好分发了！用户可以直接拖拽安装到Applications文件夹，不会遇到任何安全警告。
 
 - 晕，高兴太早了!弹窗报错。
+<img width="535" alt="Pasted Graphic 11" src="https://github.com/user-attachments/assets/0068111f-35b8-411b-8e1a-38a9e8baf8ff" />
 ai>> 你遇到的这个弹窗是macOS的“应用程序无法打开”通用报错，常见于以下几种情况：
 1. 未公证（Notarization）
 即使你已经用Developer ID Application证书签名，macOS 10.15及以上系统还要求公证（notarization），否则会阻止运行并弹出类似提示。
