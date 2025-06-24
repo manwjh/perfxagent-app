@@ -302,13 +302,13 @@ A Qt6-based cross-platform desktop application focused on audio processing, real
 - ⚡ **高性能**: 异步处理，支持流式音频处理
 
 - LOGO生成了，我觉得挺吻合的。保存！
-image.png
+![image](https://github.com/user-attachments/assets/9870b093-b78c-4579-930f-95fb2a14344f)
+
 
 - 我早就想改了，这个app名字不如叫PerfXAgent-ASR吧，主要是围绕ASR的大模型展开的。如果是手工修改，找的地方有很多，也挺复杂的。看看ai帮我大修改一下。这如同你建了一栋楼，说要把楼的外墙图给更新一下，涉及到的东西很多。主要是路径和一些名称，不会出大问题。
 to_ai>> 我需要将生成的执行文件和readme修改称为 PerfxAgent-ASR。
 - 不出所料，当运行./scripts/build_package.sh，大片红色告警。
 ... 和ai交流红色告警的问题和处理 ...
-
 
 【另外一个New Chat tab】
 - 我要讨论一下一个项目会存在各种图标和图片的资源需求。
@@ -458,10 +458,11 @@ make -j4
 - 打包的方式，增加了各种编译环境变量。突然不太适应整个调试环境了。
 - ./scripts/build_dev.sh   我离基础开发模式越来越远了😢
 - 需要创建Apple的相关证书，一步一步摸索了，挺麻烦的。只有零星碎片化时间，隔三差五完成一些。
-
+<img width="607" alt="Certiicate" src="https://github.com/user-attachments/assets/ab6dd450-e349-447b-b770-01ee706093de" />
 
 ## <font color="blue">【2025/6/24 17:43】</font>
 - 由于Apple ID账号密码忘了，本季只能留到后续增补了。需要进入到下一个阶段了。
 - 整个过程，还是比较顺利和迅速，只是处于个人的知识盲区，一些关键信息抓不住。
 - 下一季将进入到跨平台打包实验。
-
+ 
+<img width="434" alt="image" src="https://github.com/user-attachments/assets/ba29791a-bf54-4e89-8fd6-2b003b8b1442" />
