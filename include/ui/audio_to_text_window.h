@@ -15,9 +15,11 @@
 #include <QAudioOutput>
 #include <QSlider>
 #include <QToolButton>
+#include <QCloseEvent>
 #include <memory>
 #include <vector>
 #include <string>
+#include <QMap>
 #include "audio/audio_manager.h"
 #include "asr/asr_manager.h"
 
@@ -29,7 +31,26 @@ class AudioConverter;
 
 namespace ui {
 
-class EnhancedAsrCallback;
+class EnhancedAsrCallback : public QObject, public Asr::AsrCallback {
+    Q_OBJECT
+public:
+    explicit EnhancedAsrCallback(QTextEdit* te);
+    void onOpen(Asr::AsrClient* client) override;
+    void onClose(Asr::AsrClient* client) override;
+    void onMessage(Asr::AsrClient* client, const std::string& message) override;
+    void onError(Asr::AsrClient* client, const std::string& error) override;
+public slots:
+    void clearText();
+    void updateTextEdit(const QString& text, int sentenceIndex);
+    void appendError(const QString& errorMsg);
+Q_SIGNALS:
+    void finished();
+private:
+    QTextEdit* textEdit_;
+    QMap<int, QString> sentences_;
+    QString currentText_;
+    QString m_intermediateLine;
+};
 
 class AudioToTextWindow : public QWidget {
     Q_OBJECT
@@ -81,6 +102,9 @@ private:
     void updatePlaybackControls();
     QString formatTime(qint64 milliseconds);
     void startNextAsrTask();
+    
+    // 窗口事件处理
+    void closeEvent(QCloseEvent *event) override;
 
     QTextEdit* textEdit_;
     QStatusBar* statusBar_;

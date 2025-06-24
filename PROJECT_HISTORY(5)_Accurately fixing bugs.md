@@ -236,7 +236,7 @@ definite=false 表示当前正在识别的分句，用于预览区。
 - 也结束本季。
 - 就这么滴。
 <img width="508" alt="image" src="https://github.com/user-attachments/assets/6dfcdf03-d827-463a-8040-11e575a42b97" />
-这个视频是本季过程代码，新的酒没有录了。
+这个视频是本季过程代码，新的就没有录了。
 https://www.youtube.com/shorts/RSnetYNAqog
 
 

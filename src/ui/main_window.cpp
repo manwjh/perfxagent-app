@@ -9,6 +9,8 @@
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QStackedWidget>
+#include <QCloseEvent>
+#include <QApplication>
 
 namespace perfx {
 namespace ui {
@@ -73,17 +75,11 @@ void MainWindow::setupUi() {
     
     // Create sub-windows as pages
     audioToTextWindow_ = new AudioToTextWindow(this);
-    realtimeAudioToTextWindow_ = new RealtimeAudioToTextWindow(this);
-    
-    // Add pages to stacked widget
     stackedWidget_->addWidget(mainMenuWidget_);
     stackedWidget_->addWidget(audioToTextWindow_);
-    stackedWidget_->addWidget(realtimeAudioToTextWindow_);
     
     // Connect back to main menu signals
     connect(audioToTextWindow_, &AudioToTextWindow::backToMainMenuRequested, 
-            this, &MainWindow::switchToMainMenu);
-    connect(realtimeAudioToTextWindow_, &RealtimeAudioToTextWindow::backToMainMenuRequested, 
             this, &MainWindow::switchToMainMenu);
     
     // Start with main menu
@@ -132,11 +128,22 @@ void MainWindow::switchToAudioToText() {
 }
 
 void MainWindow::switchToRealtimeAudioToText() {
+    if (!realtimeAudioToTextWindow_) {
+        realtimeAudioToTextWindow_ = new RealtimeAudioToTextWindow(this);
+        stackedWidget_->addWidget(realtimeAudioToTextWindow_);
+        connect(realtimeAudioToTextWindow_, &RealtimeAudioToTextWindow::backToMainMenuRequested, 
+                this, &MainWindow::switchToMainMenu);
+    }
     stackedWidget_->setCurrentWidget(realtimeAudioToTextWindow_);
 }
 
 void MainWindow::switchToMainMenu() {
     stackedWidget_->setCurrentWidget(mainMenuWidget_);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event) {
+    QApplication::quit();
+    event->accept();
 }
 
 MainWindow::~MainWindow() = default;

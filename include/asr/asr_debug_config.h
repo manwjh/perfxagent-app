@@ -33,7 +33,22 @@ enum AsrLogLevel {
 // 主调试模式开关
 // 启用后：日志级别设为DEBUG，启用所有调试开关
 // 禁用时：日志级别设为INFO，禁用所有调试开关
-// #define ASR_DEBUG_MODE
+// 
+// 自动检测开发模式：
+// - 如果定义了 DEBUG 宏（Debug构建），自动启用调试模式
+// - 如果定义了 NDEBUG 宏（Release构建），自动禁用调试模式
+// - 也可以手动控制
+
+#ifdef DEBUG
+    #define ASR_DEBUG_MODE
+    #pragma message("ASR: Debug mode enabled (auto-detected from DEBUG macro)")
+#elif defined(NDEBUG)
+    // Release模式，不启用调试
+    #pragma message("ASR: Release mode detected, debug features disabled")
+#else
+    // 手动控制调试模式（可选）
+    // #define ASR_DEBUG_MODE
+#endif
 
 // 日志级别控制
 #ifdef ASR_DEBUG_MODE

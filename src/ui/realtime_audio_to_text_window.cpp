@@ -122,17 +122,15 @@ RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
 }
 
 RealtimeAudioToTextWindow::~RealtimeAudioToTextWindow() {
+    std::cout << "[DEBUG] RealtimeAudioToTextWindow destructor called" << std::endl;
+    
     if (controller_) {
-        // 1. 如果正在录音，先停掉录音
-        if (controller_->isRecording()) {
-            controller_->stopRecording();
-        }
-        // 2. 关闭ASR（如果在用）
-        controller_->enableRealtimeAsr(false);
-        // 3. 再 shutdown
+        std::cout << "[DEBUG] Calling controller shutdown..." << std::endl;
         controller_->shutdown();
+        std::cout << "[DEBUG] Controller shutdown completed" << std::endl;
     }
-    std::cout << "[UI] RealtimeAudioToTextWindow destroyed." << std::endl;
+    
+    std::cout << "[DEBUG] RealtimeAudioToTextWindow destroyed." << std::endl;
 }
 
 void RealtimeAudioToTextWindow::setupUI() {
@@ -446,6 +444,8 @@ void RealtimeAudioToTextWindow::updateStatusBar(const QString& message) {
 }
 
 void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
+    std::cout << "[DEBUG] RealtimeAudioToTextWindow closeEvent called" << std::endl;
+    
     if (isRecording_) {
         QMessageBox::StandardButton res = QMessageBox::question(this, "退出确认",
             "录音正在进行中，您想在退出前停止并保存录音吗？",
@@ -455,22 +455,34 @@ void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
         if (res == QMessageBox::Yes) {
             stopRecording(); // This will trigger the save dialog etc.
             // 关闭ASR
-            if (controller_) controller_->enableRealtimeAsr(false);
+            if (controller_) {
+                controller_->enableRealtimeAsr(false);
+                controller_->shutdown();
+            }
             event->accept();
         } else if (res == QMessageBox::No) {
             // User wants to discard the recording.
             // 关闭ASR
-            if (controller_) controller_->enableRealtimeAsr(false);
+            if (controller_) {
+                controller_->enableRealtimeAsr(false);
+                controller_->shutdown();
+            }
             event->accept();
         } else {
             // User cancelled the close operation.
             event->ignore();
+            return;
         }
     } else {
         // 关闭ASR
-        if (controller_) controller_->enableRealtimeAsr(false);
+        if (controller_) {
+            controller_->enableRealtimeAsr(false);
+            controller_->shutdown();
+        }
         event->accept(); // Not recording, close normally.
     }
+    
+    std::cout << "[DEBUG] RealtimeAudioToTextWindow closeEvent completed" << std::endl;
 }
 
 // ============================================================================

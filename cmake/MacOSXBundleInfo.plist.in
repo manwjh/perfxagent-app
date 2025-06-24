@@ -11,13 +11,13 @@
     <key>CFBundleIconFile</key>
     <string>${MACOSX_BUNDLE_ICON_FILE}</string>
     <key>CFBundleIdentifier</key>
-    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <string>com.perfx.agent.asr</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleLongVersionString</key>
     <string>${MACOSX_BUNDLE_LONG_VERSION_STRING}</string>
     <key>CFBundleName</key>
-    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <string>PerfxAgent-ASR</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -34,5 +34,14 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>${MACOSX_BUNDLE_COPYRIGHT}</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>PerfxAgent-ASR needs access to your microphone to perform real-time speech recognition and audio processing.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>PerfxAgent-ASR may need access to your camera for video processing features.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist> 

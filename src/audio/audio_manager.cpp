@@ -398,32 +398,52 @@ public:
         
         std::cout << "[DEBUG] AudioManager::cleanup: starting cleanup..." << std::endl;
         
-        // 停止音频流
+        // 1. 停止音频流
         if (device_ && device_->isStreamActive()) {
             std::cout << "[DEBUG] Stopping active audio stream..." << std::endl;
             device_->stopStream();
+            std::cout << "[DEBUG] Audio stream stopped" << std::endl;
         }
         
-        // 停止音频线程
+        // 2. 停止音频线程
         if (audioStreamThread_) {
-            std::cout << "[DEBUG] AudioThread::stop() called" << std::endl;
+            std::cout << "[DEBUG] Stopping audio thread..." << std::endl;
             audioStreamThread_->stop();
+            
+            // 等待线程结束，添加超时机制
+            auto startTime = std::chrono::steady_clock::now();
+            const auto timeout = std::chrono::seconds(3); // 3秒超时
+            
+            while (audioStreamThread_->isRunning()) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - startTime > timeout) {
+                    std::cout << "[DEBUG] Audio thread stop timeout, forcing cleanup" << std::endl;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
             audioStreamThread_.reset();
+            std::cout << "[DEBUG] Audio thread cleaned up" << std::endl;
         }
         
-        // 关闭音频设备
+        // 3. 关闭音频设备
         if (device_) {
-            std::cout << "[DEBUG] Closing audio stream..." << std::endl;
+            std::cout << "[DEBUG] Closing audio device..." << std::endl;
             device_->closeDevice();
             device_.reset();
+            std::cout << "[DEBUG] Audio device closed" << std::endl;
         }
         
-        // 释放处理器
+        // 4. 释放处理器
         if (processor_) {
+            std::cout << "[DEBUG] Cleaning up audio processor..." << std::endl;
             processor_.reset();
+            std::cout << "[DEBUG] Audio processor cleaned up" << std::endl;
         }
         
-        // 终止 PortAudio
+        // 5. 终止 PortAudio
+        std::cout << "[DEBUG] Terminating PortAudio..." << std::endl;
         PaError err = Pa_Terminate();
         if (err != paNoError) {
             std::cerr << "PortAudio termination failed: " << Pa_GetErrorText(err) << std::endl;
@@ -431,9 +451,9 @@ public:
             std::cout << "[DEBUG] PortAudio terminated successfully" << std::endl;
         }
         
-        recordingInfo_ = RecordingInfo(); // 重置录音状态
+        // 6. 重置状态
         initialized_ = false;
-        std::cout << "[DEBUG] AudioManager cleanup completed" << std::endl;
+        std::cout << "[DEBUG] AudioManager::cleanup: cleanup completed" << std::endl;
     }
 
     bool writeWavFile(const void* input, size_t frames, const std::string& filename) {

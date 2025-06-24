@@ -1,8 +1,10 @@
-# PerfxAgent App
+# PerfxAgent-ASR
 
 一个基于Qt6的跨平台桌面应用程序，专注于音频处理、实时语音识别(ASR)和智能转录功能。
 
-## 🚀 功能特性
+A Qt6-based cross-platform desktop application focused on audio processing, real-time speech recognition (ASR), and intelligent transcription features.
+
+## 🚀 功能特性 / Features
 
 - 🎤 **音频处理**: 高质量音频录制、播放和格式转换
 - 🗣️ **实时语音识别**: 集成火山引擎ASR服务，支持实时语音转文字
@@ -11,18 +13,33 @@
 - 🔌 **多协议支持**: 基于IXWebSocket的稳定网络通信
 - 🖥️ **现代化UI**: 基于Qt6的图形用户界面，支持多窗口管理
 - ⚡ **高性能**: 异步处理，支持流式音频处理
+- 🎨 **资源管理**: 完整的图标和UI资源管理系统
 
-## 🛠️ 系统要求
+- 🎤 **Audio Processing**: High-quality audio recording, playback, and format conversion
+- 🗣️ **Real-time Speech Recognition**: Integrated Volcengine ASR service with real-time speech-to-text
+- 📝 **Intelligent Transcription**: Supports LRC synchronization format, exportable in LRC and JSON formats
+- 🎵 **Audio Visualization**: Real-time waveform display and audio analysis
+- 🔌 **Multi-protocol Support**: Stable network communication based on IXWebSocket
+- 🖥️ **Modern UI**: Qt6-based graphical user interface with multi-window management
+- ⚡ **High Performance**: Asynchronous processing with streaming audio support
+- 🎨 **Resource Management**: Complete icon and UI resource management system
 
-- **操作系统**: macOS 10.15+, Linux (Ubuntu 18.04+), Windows 10+
-- **编译器**: 支持C++17的编译器 (GCC 7+, Clang 5+, MSVC 2017+)
+## 🛠️ 系统要求 / System Requirements
+
+- **操作系统**: macOS 10.15+
+- **编译器**: 支持C++17的编译器 (Apple Clang 12+)
 - **CMake**: 3.10或更高版本
 - **Qt**: Qt6 (Core, Widgets, Network, Gui, Multimedia, WebEngineWidgets, WebSockets, Concurrent, PrintSupport)
 
-### macOS依赖安装
+- **Operating System**: macOS 10.15+
+- **Compiler**: C++17 compatible compiler (Apple Clang 12+)
+- **CMake**: Version 3.10 or higher
+- **Qt**: Qt6 (Core, Widgets, Network, Gui, Multimedia, WebEngineWidgets, WebSockets, Concurrent, PrintSupport)
+
+### macOS依赖安装 / macOS Dependencies Installation
 
 ```bash
-# 使用Homebrew安装依赖
+# 使用Homebrew安装依赖 / Install dependencies using Homebrew
 brew install qt@6
 brew install openssl@3
 brew install portaudio
@@ -32,209 +49,258 @@ brew install libogg
 brew install nlohmann-json
 brew install websocketpp
 brew install asio
+brew install opencv
+brew install libsndfile
 ```
 
-### Linux依赖安装
+## 🏗️ 构建步骤 / Build Steps
 
+### 🚀 快速开始 / Quick Start
+
+#### 开发模式构建（推荐） / Development Build (Recommended)
 ```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install build-essential cmake
-sudo apt-get install qt6-base-dev qt6-multimedia-dev qt6-webengine-dev
-sudo apt-get install libportaudio2 libportaudio-dev
-sudo apt-get install libopus-dev libogg-dev
-sudo apt-get install nlohmann-json3-dev
-sudo apt-get install libboost-all-dev
+# 一键开发模式构建，自动启用调试功能
+./scripts/build_dev.sh
 ```
 
-## 🏗️ 构建步骤
-
-### 主应用程序
-
-1. **克隆项目**
-   ```bash
-   git clone <repository-url>
-   cd perfxagent-app
-   ```
-
-2. **创建构建目录**
-   ```bash
-   mkdir build
-   cd build
-   ```
-
-3. **配置项目**
-   ```bash
-   cmake ..
-   ```
-
-4. **编译项目**
-   ```bash
-   make -j$(nproc)
-   ```
-
-5. **运行应用程序**
-   ```bash
-   ./perfxagent-app
-   ```
-
-### 示例项目
-
-项目包含多个示例程序，可以单独编译和运行：
-
-#### ASR简单示例
-
-演示如何用一行代码完成音频文件到文本的转换：
-
+#### 生产模式构建 / Production Build
 ```bash
-# 编译ASR示例
-cd examples
-mkdir build
-cd build
-cmake ..
-make asr_simple_example
-
-# 运行ASR示例
-./asr_simple_example [音频文件路径]
+# 一键生产模式构建和打包
+./scripts/build_package.sh
 ```
 
-**ASR示例功能**:
-- 🎯 **一行代码调用**: `manager.recognizeAudioFile(audioFile)` 完成完整识别流程
-- 🔄 **异步处理**: 支持实时回调处理识别结果
-- 📝 **结果提取**: 自动解析JSON格式的识别结果
-- ⚡ **WebSocket通信**: 基于IXWebSocket的稳定连接
-
-#### 其他示例
-
+#### 调试模式构建 / Debug Build
 ```bash
-# 编译所有示例
-cd examples/build
-make
-
-# 运行特定示例
-./audio_example          # 音频处理示例
-./asr_ixwebsocket_example # ASR WebSocket示例
-./realtime_asr_test      # 实时ASR测试
+# 构建调试版本并启用所有调试功能
+./scripts/build_package.sh --debug
 ```
 
-## 🎯 核心模块
+### 手动构建步骤 / Manual Build Steps
 
-### ASR模块 (自动语音识别)
+#### 1. 开发模式 / Development Mode
+```bash
+# 清理并创建构建目录
+rm -rf build && mkdir build && cd build
 
-**核心组件**:
+# 配置项目（Debug模式）
+cmake .. -DCMAKE_BUILD_TYPE=Debug
+
+# 编译项目
+make -j$(sysctl -n hw.ncpu)
+
+# 运行应用程序（自动启用调试模式）
+cd ..
+export ASR_DEBUG=1
+export ASR_ENABLE_BUSINESS_LOG=1
+export ASR_ENABLE_FLOW_LOG=1
+export ASR_ENABLE_DATA_LOG=1
+./build/bin/PerfxAgent-ASR.app/Contents/MacOS/PerfxAgent-ASR
+```
+
+#### 2. 生产模式 / Production Mode
+```bash
+# 清理并创建构建目录
+rm -rf build && mkdir build && cd build
+
+# 配置项目（Release模式）
+cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# 编译项目
+make -j$(sysctl -n hw.ncpu)
+
+# 创建安装包
+cpack -G "DragNDrop;TGZ"
+
+# 运行应用程序
+cd ..
+./build/bin/PerfxAgent-ASR.app/Contents/MacOS/PerfxAgent-ASR
+```
+
+### 构建验证 / Build Verification
+
+编译成功后，你应该看到以下输出：
+After successful compilation, you should see the following outputs:
+
+- 主可执行文件: `PerfxAgent-ASR.app`
+- 音频处理库: `libperfx_audio.a`
+- ASR客户端库: `libperfx_asr_client.a`
+- ASR管理库: `libperfx_asr_manager.a`
+
+- Main executable: `PerfxAgent-ASR.app`
+- Audio processing library: `libperfx_audio.a`
+- ASR client library: `libperfx_asr_client.a`
+- ASR manager library: `libperfx_asr_manager.a`
+
+## 🎯 核心模块 / Core Modules
+
+### ASR模块 (自动语音识别) / ASR Module (Automatic Speech Recognition)
+
+**核心组件 / Core Components**:
 - **AsrManager**: 高级管理类，提供简化的API接口
 - **AsrClient**: 底层WebSocket客户端，处理与ASR服务的通信
 - **AsrCallback**: 回调接口，处理识别结果和状态变化
 
-**支持功能**:
+- **AsrManager**: High-level management class providing simplified API interface
+- **AsrClient**: Low-level WebSocket client handling communication with ASR service
+- **AsrCallback**: Callback interface for processing recognition results and status changes
+
+**支持功能 / Supported Features**:
 - 文件音频识别
 - 实时流式识别
 - 多种客户端实现 (IXWebSocket, Qt, WebSocketpp)
 - 配置管理和凭据管理
 
-**使用示例**:
+- File audio recognition
+- Real-time streaming recognition
+- Multiple client implementations (IXWebSocket, Qt, WebSocketpp)
+- Configuration and credential management
+
+**使用示例 / Usage Example**:
 ```cpp
 #include <asr/asr_manager.h>
 
-// 创建管理器和回调
+// 创建管理器和回调 / Create manager and callback
 Asr::AsrManager manager;
 SimpleCallback callback;
 manager.setCallback(&callback);
 
-// 一行代码完成音频识别
+// 一行代码完成音频识别 / One-line audio recognition
 bool success = manager.recognizeAudioFile("audio.wav");
 ```
 
-### 音频处理模块
+### 音频处理模块 / Audio Processing Module
 
-**核心组件**:
+**核心组件 / Core Components**:
 - **AudioManager**: 音频管理单例，统一管理音频操作
 - **AudioDevice**: 音频设备管理
 - **AudioProcessor**: 音频数据处理
 - **AudioThread**: 音频处理线程
 
-**支持功能**:
+- **AudioManager**: Audio management singleton for unified audio operations
+- **AudioDevice**: Audio device management
+- **AudioProcessor**: Audio data processing
+- **AudioThread**: Audio processing thread
+
+**支持功能 / Supported Features**:
 - 多格式音频录制 (WAV, Opus)
 - 实时音频流处理
 - 音频设备管理
 - 波形数据生成
 - 歌词同步格式支持
 
-### 实时转录控制器
+- Multi-format audio recording (WAV, Opus)
+- Real-time audio stream processing
+- Audio device management
+- Waveform data generation
+- LRC synchronization format support
 
-**核心组件**:
+### 实时转录控制器 / Real-time Transcription Controller
+
+**核心组件 / Core Components**:
 - **RealtimeTranscriptionController**: 实时转录控制逻辑
 - **RealtimeAsrCallback**: 实时ASR回调处理
 
-**支持功能**:
+- **RealtimeTranscriptionController**: Real-time transcription control logic
+- **RealtimeAsrCallback**: Real-time ASR callback processing
+
+**支持功能 / Supported Features**:
 - 实时音频录制
 - 实时ASR识别
 - 转录文本累积
 - 波形可视化
 - 多设备支持
 
-## 📁 项目结构
+- Real-time audio recording
+- Real-time ASR recognition
+- Transcription text accumulation
+- Waveform visualization
+- Multi-device support
+
+## 📁 项目结构 / Project Structure
 
 ```
 perfxagent-app/
-├── include/                    # 头文件
-│   ├── asr/                   # 语音识别相关
-│   │   ├── asr_client.h       # ASR客户端
-│   │   ├── asr_manager.h      # ASR管理器
-│   │   ├── asr_debug_config.h # ASR调试配置
-│   │   └── asr_log_utils.h    # ASR日志工具
-│   ├── audio/                 # 音频处理相关
-│   │   ├── audio_manager.h    # 音频管理器
-│   │   ├── audio_device.h     # 音频设备
-│   │   ├── audio_processor.h  # 音频处理器
-│   │   ├── audio_thread.h     # 音频线程
-│   │   ├── audio_types.h      # 音频类型定义
-│   │   └── file_importer.h    # 文件导入器
-│   ├── logic/                 # 业务逻辑
-│   │   └── realtime_transcription_controller.h # 实时转录控制器
-│   └── ui/                    # 用户界面相关
-│       ├── main_window.h      # 主窗口
-│       ├── audio_to_text_window.h      # 音频转文字窗口
-│       ├── realtime_audio_to_text_window.h # 实时音频转文字窗口
-│       └── app_icon_button.h  # 应用图标按钮
-├── src/                       # 源代码
-│   ├── asr/                   # ASR实现
-│   ├── audio/                 # 音频处理实现
-│   ├── logic/                 # 业务逻辑实现
-│   ├── ui/                    # UI实现
-│   └── main.cpp               # 主程序入口
-├── examples/                  # 示例代码
-│   ├── asr_simple_example.cpp      # ASR简单示例
-│   ├── asr_ixwebsocket_example.cpp # ASR WebSocket示例
-│   ├── realtime_asr_test.cpp       # 实时ASR测试
-│   ├── audio/                      # 音频处理示例
-│   └── README.md                   # 示例使用指南
-├── third_party/              # 第三方库
-│   └── ixwebsocket/         # IXWebSocket库
-├── sample/                   # 示例音频文件
-├── cmake/                    # CMake配置
-└── bin/                      # 编译输出目录
+├── include/                    # 头文件 / Header files
+│   ├── asr/                   # 语音识别相关 / Speech recognition related
+│   │   ├── asr_client.h       # ASR客户端 / ASR client
+│   │   ├── asr_manager.h      # ASR管理器 / ASR manager
+│   │   ├── asr_debug_config.h # ASR调试配置 / ASR debug config
+│   │   └── asr_log_utils.h    # ASR日志工具 / ASR log utilities
+│   ├── audio/                 # 音频处理相关 / Audio processing related
+│   │   ├── audio_manager.h    # 音频管理器 / Audio manager
+│   │   ├── audio_device.h     # 音频设备 / Audio device
+│   │   ├── audio_processor.h  # 音频处理器 / Audio processor
+│   │   ├── audio_thread.h     # 音频线程 / Audio thread
+│   │   ├── audio_types.h      # 音频类型定义 / Audio type definitions
+│   │   └── file_importer.h    # 文件导入器 / File importer
+│   ├── logic/                 # 业务逻辑 / Business logic
+│   │   └── realtime_transcription_controller.h # 实时转录控制器 / Real-time transcription controller
+│   └── ui/                    # 用户界面相关 / User interface related
+│       ├── main_window.h      # 主窗口 / Main window
+│       ├── audio_to_text_window.h      # 音频转文字窗口 / Audio to text window
+│       ├── realtime_audio_to_text_window.h # 实时音频转文字窗口 / Real-time audio to text window
+│       └── app_icon_button.h  # 应用图标按钮 / App icon button
+├── src/                       # 源代码 / Source code
+│   ├── asr/                   # ASR实现 / ASR implementation
+│   ├── audio/                 # 音频处理实现 / Audio processing implementation
+│   ├── logic/                 # 业务逻辑实现 / Business logic implementation
+│   ├── ui/                    # UI实现 / UI implementation
+│   ├── main.cpp               # 主程序入口 / Main program entry
+│   └── main.js                # Electron主进程 / Electron main process
+├── resources/                 # 资源文件 / Resource files
+│   ├── icons/                 # 应用图标 / Application icons
+│   │   ├── app_icon.ico       # Windows图标 / Windows icon
+│   │   ├── app_icon.icns      # macOS图标 / macOS icon
+│   │   └── ui_icons/          # UI图标 / UI icons
+│   ├── images/                # 图片资源 / Image resources
+│   │   ├── backgrounds/       # 背景图片 / Background images
+│   │   └── logos/             # Logo变体 / Logo variations
+│   ├── fonts/                 # 字体文件 / Font files
+│   └── README.md              # 资源说明 / Resource documentation
+├── scripts/                   # 工具脚本 / Utility scripts
+│   ├── icon_generator.sh      # 图标生成脚本 / Icon generation script
+│   ├── build_dev.sh           # 开发模式构建脚本 / Development build script
+│   ├── build_package.sh       # 打包脚本 / Packaging script
+│   └── README.md              # 脚本说明 / Script documentation
+├── third_party/              # 第三方库 / Third-party libraries
+│   └── ixwebsocket/         # IXWebSocket库 / IXWebSocket library
+├── sample/                   # 示例音频文件 / Sample audio files
+├── cmake/                    # CMake配置 / CMake configuration
+├── bin/                      # 编译输出目录 / Build output directory
+├── package.json              # Electron配置 / Electron configuration
+└── PROJECT_HISTORY*.md       # 项目开发历史 / Project development history
 ```
 
-## 🎵 支持格式
+## 🎵 支持格式 / Supported Formats
 
-### 音频格式
+### 音频格式 / Audio Formats
 - **输入格式**: WAV, MP3, FLAC, OGG
 - **输出格式**: WAV, Opus
 - **采样率**: 8kHz - 48kHz
 - **声道**: 单声道/立体声
 - **编码**: PCM, Opus, MP3
 
-### 转录格式
+- **Input Formats**: WAV, MP3, FLAC, OGG
+- **Output Formats**: WAV, Opus
+- **Sample Rate**: 8kHz - 48kHz
+- **Channels**: Mono/Stereo
+- **Encoding**: PCM, Opus, MP3
+
+### 转录格式 / Transcription Formats
 - **LRC格式**: 标准歌词同步格式
 - **JSON格式**: 结构化数据格式
 - **实时文本**: 支持中间结果和最终结果
 
-## 🔧 配置说明
+- **LRC Format**: Standard lyrics synchronization format
+- **JSON Format**: Structured data format
+- **Real-time Text**: Supports intermediate and final results
 
-### ASR配置
+## 🔧 配置说明 / Configuration
+
+### ASR配置 / ASR Configuration
 
 ASR模块支持多种配置选项：
+The ASR module supports various configuration options:
 
 ```cpp
 Asr::AsrConfig config;
@@ -246,7 +312,7 @@ config.sampleRate = 16000;
 config.language = "zh-CN";
 ```
 
-### 音频配置
+### 音频配置 / Audio Configuration
 
 ```cpp
 audio::AudioConfig config;
@@ -256,98 +322,184 @@ config.bitsPerSample = 16;
 config.format = EncodingFormat::WAV;
 ```
 
-## 🚀 快速开始
+## 🚀 快速开始 / Quick Start
 
-### 1. 音频文件识别
+### 0. 图标资源准备 / Icon Resource Preparation
+
+在开始开发之前，建议先生成应用图标：
+Before starting development, it's recommended to generate application icons first:
 
 ```bash
-# 编译并运行ASR示例
-cd examples/build
-./asr_simple_example sample/38s.wav
+# 1. 将您的LOGO文件放到指定位置
+# Place your LOGO file at the specified location
+cp your_logo.png resources/icons/PerfxAgent-ASR.png
+
+# 2. 运行图标生成脚本
+# Run the icon generation script
+./scripts/icon_generator.sh
+
+# 3. 检查生成的图标文件
+# Check the generated icon files
+ls -la resources/icons/
 ```
 
-### 2. 实时语音识别
+生成的图标包括：
+Generated icons include:
+- PNG格式：16x16 到 1024x1024 各种尺寸
+- ICO格式：Windows应用图标
+- ICNS格式：macOS应用图标
+
+- PNG format: Various sizes from 16x16 to 1024x1024
+- ICO format: Windows application icon
+- ICNS format: macOS application icon
+
+### 1. 音频文件识别 / Audio File Recognition
+
+使用主应用程序的"音频转文字"功能：
+Use the main application's "Audio to Text" feature:
+
+- 导入音频文件
+- 自动识别并转换为文字
+- 支持多种输出格式
+
+- Import audio files
+- Automatic recognition and text conversion
+- Support for multiple output formats
+
+### 2. 实时语音识别 / Real-time Speech Recognition
 
 ```bash
-# 运行主应用程序
+# 运行主应用程序 / Run the main application
 cd build
 ./perfxagent-app
 ```
 
 在主界面中选择"实时音频转文字"功能，开始实时语音识别。
+Select "Real-time Audio to Text" in the main interface to start real-time speech recognition.
 
-### 3. 音频录制和转换
+### 3. 音频录制和转换 / Audio Recording and Conversion
 
 使用主应用程序的"音频转文字"功能，可以：
+Using the main application's "Audio to Text" feature, you can:
+
 - 录制音频
 - 导入音频文件
 - 转换为文字
 - 导出为多种格式
 
-## 🔍 调试和故障排除
+- Record audio
+- Import audio files
+- Convert to text
+- Export in multiple formats
 
-### 启用调试模式
+## 🔍 调试和故障排除 / Debugging and Troubleshooting
 
+### 启用调试模式 / Enable Debug Mode
+
+#### 方法1：使用开发模式构建脚本（推荐）
+```bash
+# 自动启用所有调试功能
+./scripts/build_dev.sh
+```
+
+#### 方法2：手动设置环境变量
 ```bash
 # 设置环境变量启用ASR调试
 export ASR_DEBUG=1
-./perfxagent-app
+export ASR_ENABLE_BUSINESS_LOG=1
+export ASR_ENABLE_FLOW_LOG=1
+export ASR_ENABLE_DATA_LOG=1
+./build/bin/PerfxAgent-ASR.app/Contents/MacOS/PerfxAgent-ASR
 ```
 
-### 常见问题
+#### 方法3：构建时启用调试
+```bash
+# Debug构建自动启用调试功能
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Debug
+make -j$(sysctl -n hw.ncpu)
+cd ..
+./build/bin/PerfxAgent-ASR.app/Contents/MacOS/PerfxAgent-ASR
+```
 
-1. **Qt6未找到**
-   ```bash
-   # macOS
-   brew install qt@6
-   
-   # Linux
-   sudo apt-get install qt6-base-dev
-   ```
+### 调试功能说明 / Debug Features
 
-2. **音频设备问题**
-   - 检查系统音频权限
-   - 确认音频设备正常工作
-   - 查看音频设备列表
+- **ASR_DEBUG=1**: 启用ASR模块的详细调试日志
+- **ASR_ENABLE_BUSINESS_LOG=1**: 启用业务逻辑日志
+- **ASR_ENABLE_FLOW_LOG=1**: 启用流程控制日志
+- **ASR_ENABLE_DATA_LOG=1**: 启用数据处理日志
+- **ASR_ENABLE_PROTOCOL_LOG=1**: 启用协议通信日志
+- **ASR_ENABLE_AUDIO_LOG=1**: 启用音频处理日志
 
-3. **ASR连接失败**
-   - 检查网络连接
-   - 验证ASR凭据
-   - 确认防火墙设置
+## 📦 macOS打包 / macOS Packaging
 
-## 📊 版本信息
+### 创建macOS应用包 / Create macOS Application Package
 
-- **当前版本**: 1.6.1
+```bash
+# 使用一键打包脚本（推荐）
+./scripts/build_package.sh
+
+# 或者手动创建安装包
+cd build
+cpack -G "DragNDrop;TGZ"
+cd ..
+```
+
+### 使用Electron打包 / Using Electron Packaging
+
+```bash
+# 安装依赖 / Install dependencies
+npm install
+
+# 开发模式 / Development mode
+npm run dev
+
+# 构建应用 / Build application
+npm run build
+```
+
+## 📊 版本信息 / Version Information
+
+- **当前版本**: 1.6.2
 - **Qt版本**: Qt6
 - **C++标准**: C++17
-- **支持平台**: macOS, Linux, Windows
+- **支持平台**: macOS (主要), Linux, Windows (计划中)
 
-## 📄 许可证
+- **Current Version**: 1.6.2
+- **Qt Version**: Qt6
+- **C++ Standard**: C++17
+- **Supported Platforms**: macOS (Primary), Linux, Windows (Planned)
+
+## 📄 许可证 / License
 
 本项目采用MIT许可证。详情请查看项目根目录下的许可证文件。
+This project is licensed under the MIT License. See the license file in the project root directory for details.
 
-## 🤝 贡献
+## 🤝 贡献 / Contributing
 
 欢迎提交Issue和Pull Request来改进这个项目。
+Welcome to submit Issues and Pull Requests to improve this project.
 
-### 贡献指南
+### 贡献指南 / Contributing Guidelines
 
-1. Fork项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开Pull Request
+1. Fork项目 / Fork the project
+2. 创建功能分支 / Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 / Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 / Push to the branch (`git push origin feature/AmazingFeature`)
+5. 打开Pull Request / Open a Pull Request
 
-## 📞 支持
+## 📞 支持 / Support
 
-如果遇到问题，请：
+如果遇到问题，请联系作者：manwjh@126.com
+If you encounter any issues, please contact the author: manwjh@126.com
 
-1. 查看 `examples/README.md` 中的详细使用指南
-2. 检查项目的Issue页面
-3. 提交新的Issue描述问题
+1. 查看项目开发日记文档 / Check project development diary documents (`PROJECT_HISTORY*.md`)
+2. 检查项目的Issue页面 / Check the project's Issues page
+3. 提交新的Issue描述问题 / Submit a new Issue describing the problem
 
-## 🔗 相关链接
+## 🔗 相关链接 / Related Links
 
-- [火山引擎ASR API文档](https://www.volcengine.com/docs/82379)
-- [Qt6官方文档](https://doc.qt.io/qt-6/)
-- [IXWebSocket库文档](https://github.com/machinezone/IXWebSocket)
+- [火山引擎ASR API文档](https://www.volcengine.com/docs/82379) / [Volcengine ASR API Documentation](https://www.volcengine.com/docs/82379)
+- [Qt6官方文档](https://doc.qt.io/qt-6/) / [Qt6 Official Documentation](https://doc.qt.io/qt-6/)
+- [IXWebSocket库文档](https://github.com/machinezone/IXWebSocket) / [IXWebSocket Library Documentation](https://github.com/machinezone/IXWebSocket)
+- [Electron官方文档](https://www.electronjs.org/docs) / [Electron Official Documentation](https://www.electronjs.org/docs)

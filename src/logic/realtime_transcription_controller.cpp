@@ -52,41 +52,72 @@ RealtimeTranscriptionController::~RealtimeTranscriptionController() {
 void RealtimeTranscriptionController::shutdown() {
     std::cout << "[DEBUG] Controller shutdown initiated." << std::endl;
     
-    // 首先停止实时ASR
+    // 1. 首先停止实时ASR
     if (realtimeAsrEnabled_ && realtimeAsrManager_) {
+        std::cout << "[DEBUG] Stopping realtime ASR..." << std::endl;
         enableRealtimeAsr(false);
+        std::cout << "[DEBUG] Realtime ASR stopped." << std::endl;
     }
     
-    // 确保ASR连接被正确断开
+    // 2. 确保ASR连接被正确断开
     if (realtimeAsrManager_) {
         std::cout << "[DEBUG] Disconnecting ASR manager..." << std::endl;
-        realtimeAsrManager_->disconnect();
+        realtimeAsrManager_->stopRecognition(); // 先停止识别
+        realtimeAsrManager_->disconnect();      // 再断开连接
         std::cout << "[DEBUG] ASR manager disconnected." << std::endl;
     }
     
-    // 停止波形定时器
-    if (waveformTimer_ && waveformTimer_->isActive()) {
-        waveformTimer_->stop();
-        std::cout << "[DEBUG] Waveform timer stopped." << std::endl;
+    // 3. 停止波形定时器
+    if (waveformTimer_) {
+        if (waveformTimer_->isActive()) {
+            waveformTimer_->stop();
+            std::cout << "[DEBUG] Waveform timer stopped." << std::endl;
+        }
+        waveformTimer_->deleteLater(); // 确保定时器被删除
+        waveformTimer_ = nullptr;
     }
     
-    // 清理音频管理器
+    // 4. 停止录音（如果正在录音）
+    if (isRecording_) {
+        std::cout << "[DEBUG] Stopping active recording..." << std::endl;
+        stopRecording();
+        std::cout << "[DEBUG] Recording stopped." << std::endl;
+    }
+    
+    // 5. 清理音频管理器
     if (audioManager_) {
-        audioManager_->cleanup();
-        std::cout << "[DEBUG] Audio manager cleanup requested." << std::endl;
+        std::cout << "[DEBUG] Cleaning up audio manager..." << std::endl;
+        audioManager_->stopStreamRecording(); // 先停止录音流
+        audioManager_->cleanup();             // 再清理资源
+        std::cout << "[DEBUG] Audio manager cleanup completed." << std::endl;
     }
     
-    // 清理ASR回调
+    // 6. 清理ASR回调
     if (realtimeAsrCallback_) {
+        std::cout << "[DEBUG] Cleaning up ASR callback..." << std::endl;
         realtimeAsrCallback_.reset();
         std::cout << "[DEBUG] ASR callback cleaned up." << std::endl;
     }
     
-    // 清理ASR管理器
+    // 7. 清理ASR管理器
     if (realtimeAsrManager_) {
+        std::cout << "[DEBUG] Cleaning up ASR manager..." << std::endl;
         realtimeAsrManager_.reset();
         std::cout << "[DEBUG] ASR manager cleaned up." << std::endl;
     }
+    
+    // 8. 清理音频管理器
+    if (audioManager_) {
+        std::cout << "[DEBUG] Final cleanup of audio manager..." << std::endl;
+        audioManager_.reset();
+        std::cout << "[DEBUG] Audio manager final cleanup completed." << std::endl;
+    }
+    
+    // 9. 重置状态
+    isRecording_ = false;
+    isPaused_ = false;
+    realtimeAsrEnabled_ = false;
+    selectedDeviceId_ = -1;
     
     std::cout << "[DEBUG] Controller shutdown completed." << std::endl;
 }

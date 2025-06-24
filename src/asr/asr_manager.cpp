@@ -311,10 +311,47 @@ bool AsrManager::startRecognition() {
 }
 
 void AsrManager::stopRecognition() {
-    if (m_workerThread.joinable()) {
-        m_stopRequested = true;
-        m_workerThread.join();
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 请求停止ASR识别...");
+    
+    // 设置停止标志
+    m_stopFlag = true;
+    m_stopRequested = true;
+    
+    // 断开客户端连接
+    if (m_client) {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 断开ASR客户端连接...");
+        m_client->disconnect();
     }
+    
+    // 等待工作线程结束，添加超时机制
+    if (m_workerThread.joinable()) {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "⏳ 等待ASR工作线程结束...");
+        
+        // 使用超时等待，避免无限等待
+        auto startTime = std::chrono::steady_clock::now();
+        const auto timeout = std::chrono::seconds(5); // 5秒超时
+        
+        while (m_workerThread.joinable()) {
+            auto now = std::chrono::steady_clock::now();
+            if (now - startTime > timeout) {
+                logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ ASR工作线程等待超时，强制停止");
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        
+        if (m_workerThread.joinable()) {
+            m_workerThread.join();
+        }
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR工作线程已结束");
+    }
+    
+    // 重置状态
+    m_status = AsrStatus::DISCONNECTED;
+    m_stopFlag = false;
+    m_stopRequested = false;
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR识别已停止");
 }
 
 // ============================================================================
@@ -1417,10 +1454,12 @@ void AsrManager::recognition_thread_func(const std::string& filePath) {
     logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ Full Client Request 发送成功，开始流式发送音频包");
     // 逐包发送
     for (size_t i = 0; i < m_audioPackets.size(); ++i) {
-        if (m_stopFlag) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 检测到错误，停止音频包发送", true);
+        // 检查停止标志
+        if (m_stopFlag || m_stopRequested) {
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 检测到停止请求，停止音频包发送");
             break;
         }
+        
         bool isLast = (i == m_audioPackets.size() - 1);
         if (!m_client->sendAudioFile(m_audioPackets[i], isLast, static_cast<int32_t>(i + 1))) {
             logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频包失败: " + std::to_string(i), true);
@@ -1430,9 +1469,23 @@ void AsrManager::recognition_thread_func(const std::string& filePath) {
             break;
         }
         logMessage(m_config.logLevel, ASR_LOG_INFO, "📦 已发送音频包: " + std::to_string(i + 1) + (isLast ? " (最后一包)" : ""));
-        std::this_thread::sleep_for(std::chrono::milliseconds(m_config.segDuration));
+        
+        // 在等待期间也检查停止标志
+        for (int j = 0; j < m_config.segDuration; ++j) {
+            if (m_stopFlag || m_stopRequested) {
+                logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 检测到停止请求，中断等待");
+                goto send_complete;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 所有音频包发送完成，总包数: " + std::to_string(m_audioPackets.size()));
+    
+send_complete:
+    if (m_stopFlag || m_stopRequested) {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 ASR识别被用户停止");
+    } else {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 所有音频包发送完成，总包数: " + std::to_string(m_audioPackets.size()));
+    }
     m_status = AsrStatus::DISCONNECTED;
     logMessage(m_config.logLevel, ASR_LOG_INFO, "🏁 ASR识别线程已结束");
     m_stopFlag = false; // 线程结束时重置

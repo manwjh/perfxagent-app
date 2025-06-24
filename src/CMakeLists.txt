@@ -109,7 +109,9 @@ set(HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/app_icon_button.h
 )
 
-add_executable(perfxagent-app
+# 确保 icon 文件被加到 bundle
+set(APP_ICON_MACOS "${CMAKE_SOURCE_DIR}/resources/icons/app_icon.icns")
+set(SOURCES
     main.cpp
     ui/main_window.cpp
     ui/audio_to_text_window.cpp
@@ -117,6 +119,12 @@ add_executable(perfxagent-app
     logic/realtime_transcription_controller.cpp
     ui/app_icon_button.cpp
     ${HEADERS}
+    ${APP_ICON_MACOS}
+)
+set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
+add_executable(perfxagent-app
+    ${SOURCES}
 )
 
 # 设置主应用程序的包含目录
@@ -167,35 +175,13 @@ target_link_libraries(perfxagent-app PRIVATE
     ${SNDFILE_LIBRARIES}
 )
 
-# 复制 Qt DLL 到输出目录（仅 Windows）
-if(WIN32)
-    # 获取所有需要的 Qt DLL
-    set(QT_COMPONENTS Core Gui Widgets Network Multimedia WebEngineWidgets WebSockets Concurrent PrintSupport)
-    foreach(COMPONENT ${QT_COMPONENTS})
-        add_custom_command(TARGET perfxagent-app POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:Qt6::${COMPONENT}>
-                $<TARGET_FILE_DIR:perfxagent-app>
-        )
-    endforeach()
-    
-    # 复制 Qt 插件
-    if(EXISTS "${Qt6_DIR}/../../../plugins")
-        add_custom_command(TARGET perfxagent-app POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${Qt6_DIR}/../../../plugins"
-                "$<TARGET_FILE_DIR:perfxagent-app>/plugins"
-        )
-    endif()
-endif()
-
-# macOS 特定配置
-if(APPLE)
-    # 设置 macOS bundle 信息
-    set_target_properties(perfxagent-app PROPERTIES
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.perfx.agent"
-        MACOSX_BUNDLE_BUNDLE_VERSION ${PERFXAGENT_VERSION}
-        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PERFXAGENT_VERSION}
-        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in
-    )
-endif() 
+# macOS Bundle 配置
+set_target_properties(perfxagent-app PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.perfx.agent.asr"
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PERFXAGENT_VERSION}
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PERFXAGENT_VERSION}
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in
+    MACOSX_BUNDLE_ICON_FILE "app_icon.icns"
+    OUTPUT_NAME "PerfxAgent-ASR"
+) 
