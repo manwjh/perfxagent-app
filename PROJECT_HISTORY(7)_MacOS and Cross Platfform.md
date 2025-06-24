@@ -54,5 +54,6 @@ ai>> ...
 - 在帮我清理OpenCV时，也可以自己搜索一下项关键词，帮ai清理一下。AI每次清理都不怎么干净。
 ...
 - 哈哈，居然成功了。至少是本机上完全可以运行。
+<img width="482" alt="image" src="https://github.com/user-attachments/assets/7975af97-3f2c-4425-ae46-1a3cc257b2a3" />
 
 - [2025/6/25 00:21] 可以收工了！
