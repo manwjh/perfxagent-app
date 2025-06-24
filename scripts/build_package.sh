@@ -49,7 +49,7 @@ check_dependencies() {
     fi
     
     # 检查其他依赖
-    local deps=("openssl@3" "portaudio" "boost" "opus" "libogg" "nlohmann-json" "websocketpp" "asio" "opencv" "libsndfile")
+    local deps=("openssl@3" "portaudio" "boost" "opus" "libogg" "nlohmann-json" "websocketpp" "asio" "libsndfile")
     for dep in "${deps[@]}"; do
         if ! brew list "$dep" &> /dev/null; then
             log_warning "$dep is not installed. Installing..."

@@ -38,3 +38,21 @@ ai>> 你遇到的这个弹窗是macOS的“应用程序无法打开”通用报�
 公证后再 stapler staple（加盖公证戳）。
 ...
 
+to_ai>> 你能检查包，包括使用运行测试，去定为问题吗？
+ai>> 好
+- 我提出了一个检查过程，卡死的地方的报错信息。
+ai>> ...
+你的问题本质
+找不到依赖库：libopencv_core.411.dylib 没有被正确打包进 .app/Contents/Frameworks/ 目录。
+系统/第三方库签名不一致：macOS 13+ 对沙盒/签名校验极为严格，Homebrew 安装的 OpenCV 库 Team ID 和你自己签名的 app 不一致，导致即使找到了也不能用。
+解决方案
+1. 必须把所有 OpenCV 相关 dylib 打包进 .app/Contents/Frameworks/
+你不能依赖 Homebrew 的系统路径，必须用 macdeployqt 或 install_name_tool 把所有依赖库复制到 .app/Contents/Frameworks/ 下，并修正引用路径。
+...
+...
+- OpenCV我已经不用了，因为去掉了Camera模块。估计代码没有清理。一丝希望出现。
+- 在帮我清理OpenCV时，也可以自己搜索一下项关键词，帮ai清理一下。AI每次清理都不怎么干净。
+...
+- 哈哈，居然成功了。至少是本机上完全可以运行。
+
+- [2025/6/25 00:21] 可以收工了！

@@ -147,7 +147,6 @@ target_include_directories(perfxagent-app PRIVATE
     ${Boost_INCLUDE_DIRS}
     ${BOOST_INCLUDEDIR}
     ${nlohmann_json_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
 )
 
 # 链接主应用程序的依赖
@@ -166,7 +165,6 @@ target_link_libraries(perfxagent-app PRIVATE
     Qt6::PrintSupport
     nlohmann_json::nlohmann_json
     portaudio
-    ${OpenCV_LIBS}
     ${OPENSSL_LIBRARIES}
     ${Boost_LIBRARIES}
     ${PORTAUDIO_LIBRARIES}

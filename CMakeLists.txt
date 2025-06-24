@@ -210,10 +210,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # 查找必要的包
-message(STATUS "Finding OpenCV...")
-find_package(OpenCV REQUIRED)
-message(STATUS "OpenCV found: ${OpenCV_VERSION}")
-
 message(STATUS "Finding PkgConfig...")
 find_package(PkgConfig REQUIRED)
 message(STATUS "PkgConfig found: ${PKG_CONFIG_VERSION}")
@@ -242,7 +238,6 @@ message(STATUS "nlohmann_json found: ${nlohmann_json_VERSION}")
 # 添加头文件目录
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
-    ${OpenCV_INCLUDE_DIRS}
     ${PORTAUDIO_INCLUDE_DIRS}
     ${OPUS_INCLUDE_DIRS}
     ${OGG_INCLUDE_DIRS}
@@ -253,7 +248,6 @@ include_directories(
 
 # 添加库目录
 link_directories(
-    ${OpenCV_LIBRARY_DIRS}
     ${PORTAUDIO_LIBRARY_DIRS}
     ${OPUS_LIBRARY_DIRS}
     ${OGG_LIBRARY_DIRS}
