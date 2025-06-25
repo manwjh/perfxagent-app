@@ -598,3 +598,5 @@ qt.qpa.fonts: Populating font family aliases took 156 ms. Replace uses of missin
 
 ## <font color="blue">【2025/6/24 23:03】</font>
 - 准备结束战斗。上传版本。
+- 一些意外，关于UI，没有设计能力，它改成啥样觉得都超过我。所以哪里跌倒那里躺下😷。我的界面从手机变成了平板😢
+<img width="658" alt="Pasted Graphic" src="https://github.com/user-attachments/assets/c379acd8-90b0-4e70-ab1d-c4c17b04078e" />
