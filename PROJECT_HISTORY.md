@@ -26,8 +26,9 @@
 摘要：记录了作者使用AI Coding进行项目打包发布和资源管理的开发笔记，记录了作者在2025年6月24日期间，为PerfxAgent-ASR项目建立完整的macOS安装包打包系统和图标资源管理体系的开发过程。主要成果包括清理了CMakeLists.txt中的跨平台代码、建立了完整的图标生成体系（支持多种尺寸的PNG、ICO、ICNS格式）、实现了基于CPack的macOS DMG/TGZ安装包自动构建、修复了版本号不一致问题，以及完善了项目的文档体系。开发过程中遇到了依赖库名称不匹配、版本号冲突等技术挑战，通过AI辅助最终成功建立了完整的项目发布流程，为项目建立了专业级的打包发布能力和资源管理体系。
 
 ## PROJECT_HISTORY(7)_ installation package.md
-链接：...
-摘要：...
+链接：./PROJECT_HISTORY(7)_%20installation%20package.md
+摘要：成功完成 macOS 应用程序的 Developer ID 签名和打包，解决了 OpenCV 残留依赖库问题，这个是造成本季进度不如预期的重要原因之一。
+
 
 ## 结束语
 （暂无）

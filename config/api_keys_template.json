@@ -1,0 +1,12 @@
+{
+  "app_id": "REPLACE_WITH_YOUR_APP_ID",
+  "access_token": "REPLACE_WITH_YOUR_ACCESS_TOKEN",
+  "secret_key": "REPLACE_WITH_YOUR_SECRET_KEY",
+  "description": "火山引擎ASR API密钥配置",
+  "instructions": [
+    "1. 复制此文件为 api_keys.json",
+    "2. 替换为你的真实API密钥",
+    "3. 确保 api_keys.json 不会被提交到Git",
+    "4. 运行 generate_obfuscated_keys.py 生成混淆数据"
+  ]
+} 

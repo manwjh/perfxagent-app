@@ -13,44 +13,63 @@ namespace audio {
 class AudioConverter::Impl {
 public:
     Impl() : isConverting_(false) {
-        std::cout << "[DEBUG] Initializing AudioConverter::Impl..." << std::endl;
-        std::cout << "[DEBUG] AudioConverter::Impl initialization completed" << std::endl;
+        std::cout << "[AUDIO-THREAD] Initializing AudioConverter::Impl..." << std::endl;
+        std::cout << "[AUDIO-THREAD] AudioConverter::Impl initialization completed" << std::endl;
     }
 
     ~Impl() {
-        std::cout << "[DEBUG] Destroying AudioConverter::Impl..." << std::endl;
-        std::cout << "[DEBUG] AudioConverter::Impl destroyed" << std::endl;
+        std::cout << "[AUDIO-THREAD] Destroying AudioConverter::Impl..." << std::endl;
+        std::cout << "[AUDIO-THREAD] AudioConverter::Impl destroyed" << std::endl;
     }
 
     bool startConversion(const std::string& inputFile, const std::string& outputFile) {
-        std::cout << "[DEBUG] Starting conversion..." << std::endl;
-        std::cout << "[DEBUG] Input file: " << inputFile << std::endl;
-        std::cout << "[DEBUG] Output file: " << outputFile << std::endl;
+        std::cout << "[AUDIO-THREAD] Starting conversion..." << std::endl;
+        std::cout << "[AUDIO-THREAD] Input file: " << inputFile << std::endl;
+        std::cout << "[AUDIO-THREAD] Output file: " << outputFile << std::endl;
         
         if (isConverting_) {
             lastError_ = "Already converting";
-            std::cerr << "[ERROR] " << lastError_ << std::endl;
+            std::cerr << "[AUDIO-THREAD][ERROR] " << lastError_ << std::endl;
             return false;
         }
 
         isConverting_ = true;
         currentProgress_ = ConversionProgress{};
         
-        // 创建转换线程
-        std::thread conversionThread([this, inputFile, outputFile]() {
-            std::cout << "[DEBUG] Conversion thread started" << std::endl;
+        // 检查输入文件是否存在
+        if (!std::filesystem::exists(inputFile)) {
+            lastError_ = "Input file does not exist: " + inputFile;
+            std::cerr << "[AUDIO-THREAD][ERROR] " << lastError_ << std::endl;
+            return false;
+        }
+        
+        // 检查输出目录是否存在
+        std::filesystem::path outputPath(outputFile);
+        std::filesystem::path outputDir = outputPath.parent_path();
+        if (!outputDir.empty() && !std::filesystem::exists(outputDir)) {
+            try {
+                std::filesystem::create_directories(outputDir);
+            } catch (const std::exception& e) {
+                lastError_ = "Failed to create output directory: " + std::string(e.what());
+                std::cerr << "[AUDIO-THREAD][ERROR] Conversion failed: " << e.what() << std::endl;
+                return false;
+            }
+        }
+        
+        // 启动转换线程
+        std::cout << "[AUDIO-THREAD] Conversion thread started" << std::endl;
+        conversionThread_ = std::thread([this, inputFile, outputFile]() {
             try {
                 convertFile(inputFile, outputFile);
             } catch (const std::exception& e) {
-                std::cerr << "[ERROR] Conversion failed: " << e.what() << std::endl;
-                lastError_ = e.what();
+                lastError_ = "Conversion thread exception: " + std::string(e.what());
+                std::cerr << "[AUDIO-THREAD][ERROR] " << lastError_ << std::endl;
             }
             isConverting_ = false;
-            std::cout << "[DEBUG] Conversion thread finished" << std::endl;
+            std::cout << "[AUDIO-THREAD] Conversion thread finished" << std::endl;
         });
-        conversionThread.detach();
         
-        std::cout << "[DEBUG] Conversion thread created and detached" << std::endl;
+        std::cout << "[AUDIO-THREAD] Conversion thread created and detached" << std::endl;
         return true;
     }
 
@@ -147,6 +166,7 @@ private:
     std::string lastError_;
     ConversionProgress currentProgress_;
     ProgressCallback progressCallback_;
+    std::thread conversionThread_;
 };
 
 // AudioConverter implementation

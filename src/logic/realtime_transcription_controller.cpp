@@ -12,37 +12,53 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QApplication>
+#include <chrono>
 
 namespace perfx {
 namespace logic {
 
 // Omitting the ControllerAsrCallback for now as we simulate the results
 
-RealtimeTranscriptionController::RealtimeTranscriptionController(QObject* parent)
-    : QObject(parent), selectedDeviceId_(-1) {
-    audioManager_ = std::make_unique<audio::AudioManager>();
-    // No ASR Manager needed for simulation
-    
-    // 创建定时器来定期获取波形数据
+RealtimeTranscriptionController::RealtimeTranscriptionController(QWidget* parent)
+    : QObject(parent)
+    , parentWindow_(parent)
+    , audioManager_(nullptr)
+    , asrManager_(nullptr)
+    , asrCallback_(nullptr)
+    , waveformTimer_(nullptr)
+    , isRecording_(false)
+    , recordingStartTime_(0)
+    , recordedBytes_(0)
+    , realtimeAsrEnabled_(false)
+    , tempWavFilePath_("")
+{
+    // 创建波形更新定时器
     waveformTimer_ = new QTimer(this);
     waveformTimer_->setInterval(50); // 50ms = 20fps
-    connect(waveformTimer_, &QTimer::timeout, this, &RealtimeTranscriptionController::onWaveformTimerTimeout);
-    std::cout << "[DEBUG] RealtimeTranscriptionController: waveform timer created" << std::endl;
-
-    // 初始化成员变量
-    isRecording_ = false;
-    isPaused_ = false;
-    recordingStartTime_ = 0;
-    tempWavFilePath_ = "";
-    selectedDeviceId_ = -1;
-    realtimeAsrEnabled_ = false;
-
-    // 初始化实时ASR管理器
-    realtimeAsrManager_ = std::make_unique<Asr::AsrManager>();
-    realtimeAsrCallback_ = std::make_unique<RealtimeAsrCallback>(this);
-    realtimeAsrManager_->setCallback(realtimeAsrCallback_.get());
-
-    std::cout << "[DEBUG] RealtimeTranscriptionController: all member variables initialized" << std::endl;
+    connect(waveformTimer_, &QTimer::timeout, this, &RealtimeTranscriptionController::updateWaveform);
+    std::cout << "[CTRL] RealtimeTranscriptionController: waveform timer created" << std::endl;
+    
+    // 初始化音频管理器
+    audioManager_ = std::make_unique<audio::AudioManager>();
+    
+    // 初始化ASR管理器
+    asrManager_ = std::make_unique<Asr::AsrManager>();
+    
+    // 创建ASR回调
+    asrCallback_ = std::make_unique<RealtimeAsrCallback>(this);
+    asrManager_->setCallback(asrCallback_.get());
+    
+    // 连接ASR信号
+    connect(asrCallback_.get(), &RealtimeAsrCallback::transcriptionUpdated,
+            this, &RealtimeTranscriptionController::onAsrTranscriptionUpdated);
+    connect(asrCallback_.get(), &RealtimeAsrCallback::error,
+            this, &RealtimeTranscriptionController::onAsrError);
+    connect(asrCallback_.get(), &RealtimeAsrCallback::connectionStatusChanged,
+            this, &RealtimeTranscriptionController::onAsrConnectionStatusChanged);
+    connect(asrCallback_.get(), &RealtimeAsrCallback::utterancesUpdated,
+            this, &RealtimeTranscriptionController::onAsrUtterancesUpdated);
+    
+    std::cout << "[CTRL] RealtimeTranscriptionController: all member variables initialized" << std::endl;
 }
 
 RealtimeTranscriptionController::~RealtimeTranscriptionController() {
@@ -50,109 +66,112 @@ RealtimeTranscriptionController::~RealtimeTranscriptionController() {
 }
 
 void RealtimeTranscriptionController::shutdown() {
-    std::cout << "[DEBUG] Controller shutdown initiated." << std::endl;
+    std::cout << "[CTRL] Controller shutdown initiated." << std::endl;
     
     // 1. 首先停止实时ASR
-    if (realtimeAsrEnabled_ && realtimeAsrManager_) {
-        std::cout << "[DEBUG] Stopping realtime ASR..." << std::endl;
+    if (realtimeAsrEnabled_ && asrManager_) {
+        std::cout << "[ASR-THREAD] Stopping realtime ASR..." << std::endl;
         enableRealtimeAsr(false);
-        std::cout << "[DEBUG] Realtime ASR stopped." << std::endl;
+        std::cout << "[ASR-THREAD] Realtime ASR stopped." << std::endl;
     }
     
     // 2. 确保ASR连接被正确断开
-    if (realtimeAsrManager_) {
-        std::cout << "[DEBUG] Disconnecting ASR manager..." << std::endl;
-        realtimeAsrManager_->stopRecognition(); // 先停止识别
-        realtimeAsrManager_->disconnect();      // 再断开连接
-        std::cout << "[DEBUG] ASR manager disconnected." << std::endl;
+    if (asrManager_) {
+        std::cout << "[ASR-THREAD] Disconnecting ASR manager..." << std::endl;
+        asrManager_->stopRecognition(); // 先停止识别
+        asrManager_->disconnect();      // 再断开连接
+        std::cout << "[ASR-THREAD] ASR manager disconnected." << std::endl;
     }
     
     // 3. 停止波形定时器
     if (waveformTimer_) {
-        if (waveformTimer_->isActive()) {
-            waveformTimer_->stop();
-            std::cout << "[DEBUG] Waveform timer stopped." << std::endl;
-        }
-        waveformTimer_->deleteLater(); // 确保定时器被删除
+        std::cout << "[CTRL] Stopping waveform timer..." << std::endl;
+        waveformTimer_->stop();
+        std::cout << "[CTRL] Waveform timer stopped." << std::endl;
+        
+        // 清理定时器
+        waveformTimer_->deleteLater();
         waveformTimer_ = nullptr;
+        std::cout << "[CTRL] Waveform timer cleanup completed." << std::endl;
     }
     
-    // 4. 停止录音（如果正在录音）
+    // 4. 停止录音
     if (isRecording_) {
-        std::cout << "[DEBUG] Stopping active recording..." << std::endl;
+        std::cout << "[AUDIO-THREAD] Stopping active recording..." << std::endl;
         stopRecording();
-        std::cout << "[DEBUG] Recording stopped." << std::endl;
+        std::cout << "[AUDIO-THREAD] Recording stopped." << std::endl;
     }
     
     // 5. 清理音频管理器
     if (audioManager_) {
-        std::cout << "[DEBUG] Cleaning up audio manager..." << std::endl;
-        audioManager_->stopStreamRecording(); // 先停止录音流
-        audioManager_->cleanup();             // 再清理资源
-        std::cout << "[DEBUG] Audio manager cleanup completed." << std::endl;
+        std::cout << "[AUDIO-THREAD] Cleaning up audio manager..." << std::endl;
+        audioManager_->stopRecording();
+        audioManager_->shutdown();
+        std::cout << "[AUDIO-THREAD] Audio manager cleanup completed." << std::endl;
     }
     
     // 6. 清理ASR回调
-    if (realtimeAsrCallback_) {
-        std::cout << "[DEBUG] Cleaning up ASR callback..." << std::endl;
-        realtimeAsrCallback_.reset();
-        std::cout << "[DEBUG] ASR callback cleaned up." << std::endl;
+    if (asrCallback_) {
+        std::cout << "[ASR-THREAD] Cleaning up ASR callback..." << std::endl;
+        asrCallback_.reset();
+        std::cout << "[ASR-THREAD] ASR callback cleaned up." << std::endl;
     }
     
     // 7. 清理ASR管理器
-    if (realtimeAsrManager_) {
-        std::cout << "[DEBUG] Cleaning up ASR manager..." << std::endl;
-        realtimeAsrManager_.reset();
-        std::cout << "[DEBUG] ASR manager cleaned up." << std::endl;
+    if (asrManager_) {
+        std::cout << "[ASR-THREAD] Cleaning up ASR manager..." << std::endl;
+        asrManager_.reset();
+        std::cout << "[ASR-THREAD] ASR manager cleaned up." << std::endl;
     }
     
-    // 8. 清理音频管理器
+    // 8. 最终清理音频管理器
     if (audioManager_) {
-        std::cout << "[DEBUG] Final cleanup of audio manager..." << std::endl;
+        std::cout << "[AUDIO-THREAD] Final cleanup of audio manager..." << std::endl;
         audioManager_.reset();
-        std::cout << "[DEBUG] Audio manager final cleanup completed." << std::endl;
+        std::cout << "[AUDIO-THREAD] Audio manager final cleanup completed." << std::endl;
     }
     
     // 9. 重置状态
     isRecording_ = false;
-    isPaused_ = false;
+    recordingStartTime_ = 0;
+    recordedBytes_ = 0;
     realtimeAsrEnabled_ = false;
-    selectedDeviceId_ = -1;
     
-    std::cout << "[DEBUG] Controller shutdown completed." << std::endl;
+    // 10. 清理设备列表
+    availableDevices_.clear();
+    
+    std::cout << "[CTRL] Controller shutdown completed." << std::endl;
 }
 
 void RealtimeTranscriptionController::refreshAudioDevices() {
     std::cout << "[DEBUG] refreshAudioDevices() called" << std::endl;
-    
+    // 修复：如果audioManager_为nullptr，重新new一个，确保PortAudio能被初始化
+    if (!audioManager_) {
+        std::cout << "[DEBUG] audioManager_ is nullptr, recreating AudioManager..." << std::endl;
+        audioManager_ = std::make_unique<audio::AudioManager>();
+    }
     // 获取真实的音频设备列表
     if (audioManager_) {
         availableDevices_ = audioManager_->getAvailableDevices();
         QStringList deviceNames;
         QList<int> deviceIds;
-        
         std::cout << "[DEBUG] Found " << availableDevices_.size() << " total devices" << std::endl;
-        
         for (const auto& device : availableDevices_) {
             std::cout << "[DEBUG] Device " << device.index << ": " << device.name 
                       << " (maxInputChannels: " << device.maxInputChannels << ")" << std::endl;
-            
             if (device.maxInputChannels > 0) {  // 只显示输入设备
                 deviceNames.append(QString::fromStdString(device.name));
                 deviceIds.append(device.index);
                 std::cout << "[DEBUG] Added input device: " << device.index << " - " << device.name << std::endl;
             }
         }
-        
         std::cout << "[DEBUG] Emitting audioDeviceListUpdated with " << deviceNames.size() << " devices" << std::endl;
         for (int i = 0; i < deviceNames.size(); ++i) {
             std::cout << "[DEBUG]   Device " << i << ": " << deviceNames[i].toStdString() << " (ID: " << deviceIds[i] << ")" << std::endl;
         }
-        
         emit audioDeviceListUpdated(deviceNames, deviceIds);
     } else {
         std::cout << "[DEBUG] AudioManager not available, using fallback device list" << std::endl;
-        // 模拟设备列表作为备选
         QStringList deviceNames = {"Default - Microphone", "Line In (Audio Interface)"};
         QList<int> deviceIds = {0, 1};
         emit audioDeviceListUpdated(deviceNames, deviceIds);
@@ -244,7 +263,7 @@ void RealtimeTranscriptionController::selectAudioDevice(int deviceId) {
             this->onAudioData(input, output, frameCount);
         });
         
-        // 启动音频流来获取实时音频数据
+        // **关键修复：启动音频流来获取实时音频数据**
         std::cout << "[DEBUG] Starting audio stream..." << std::endl;
         if (!audioManager_->startStreamRecording("")) {
             std::cerr << "[ERROR] Failed to start audio stream" << std::endl;
@@ -254,9 +273,10 @@ void RealtimeTranscriptionController::selectAudioDevice(int deviceId) {
         
         std::cout << "[DEBUG] Audio stream started successfully for waveform display" << std::endl;
         
-        // 启动波形更新定时器
+        // **关键修复：启动波形更新定时器，但降低频率避免过度更新**
+        waveformTimer_->setInterval(100); // 100ms = 10fps，降低更新频率
         waveformTimer_->start();
-        std::cout << "[DEBUG] Waveform timer started" << std::endl;
+        std::cout << "[DEBUG] Waveform timer started with 100ms interval" << std::endl;
         
         emit deviceSelectionResult(true, "Device selected successfully");
     } else {
@@ -266,10 +286,17 @@ void RealtimeTranscriptionController::selectAudioDevice(int deviceId) {
 }
 
 void RealtimeTranscriptionController::onWaveformTimerTimeout() {
+    // 波形更新定时器现在主要用于备用机制
+    // 主要的波形数据更新通过 onAudioData 回调直接发送
     if (audioManager_) {
         QVector<float> waveformData = audioManager_->getLatestWaveformData();
         if (!waveformData.isEmpty()) {
-            emit waveformUpdated(waveformData);
+            // 只有在没有直接音频数据时才使用定时器数据
+            static int timerUpdateCount = 0;
+            timerUpdateCount++;
+            if (timerUpdateCount % 10 == 0) { // 每10次更新一次，避免过度更新
+                emit waveformUpdated(waveformData);
+            }
         }
     }
 }
@@ -280,6 +307,21 @@ void RealtimeTranscriptionController::onAudioData(const void* input, void* outpu
     
     if (!input || frameCount == 0) {
         return;
+    }
+    
+    // 添加调试信息，但限制频率
+    static int controllerCallbackCount = 0;
+    static std::chrono::steady_clock::time_point lastControllerLog = std::chrono::steady_clock::now();
+    controllerCallbackCount++;
+    
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastControllerLog).count();
+    
+    if (elapsed >= 2000) { // 每2秒输出一次调试信息
+        std::cout << "[DEBUG] Controller audio callback - callbacks: " << controllerCallbackCount 
+                  << ", frameCount: " << frameCount << std::endl;
+        controllerCallbackCount = 0;
+        lastControllerLog = now;
     }
     
     // 将INT16音频数据转换为浮点数用于波形显示
@@ -293,8 +335,10 @@ void RealtimeTranscriptionController::onAudioData(const void* input, void* outpu
         waveformData.append(normalizedSample);
     }
     
-    // 发送波形数据到UI
-    emit waveformUpdated(waveformData);
+    // **关键修复：直接发送波形数据到UI，不依赖定时器**
+    if (!waveformData.isEmpty()) {
+        emit waveformUpdated(waveformData);
+    }
     
     // 处理实时ASR音频数据
     if (realtimeAsrEnabled_) {
@@ -328,7 +372,6 @@ bool RealtimeTranscriptionController::startRecording() {
     // 开始录音
     if (audioManager_->startRecording(tempWavFilePath_.toStdString())) {
         isRecording_ = true;
-        isPaused_ = false;
         recordingStartTime_ = QDateTime::currentMSecsSinceEpoch();
         
         // 启用实时ASR
@@ -366,7 +409,6 @@ void RealtimeTranscriptionController::stopRecording() {
     }
     
     isRecording_ = false;
-    isPaused_ = false;
     recordingStartTime_ = 0;
     
     emit recordingStateChanged(false, false);
@@ -374,7 +416,7 @@ void RealtimeTranscriptionController::stopRecording() {
 }
 
 void RealtimeTranscriptionController::pauseRecording() {
-    if (!isRecording_ || isPaused_) {
+    if (!isRecording_) {
         std::cout << "[WARNING] Cannot pause recording" << std::endl;
         return;
     }
@@ -383,13 +425,12 @@ void RealtimeTranscriptionController::pauseRecording() {
         audioManager_->pauseRecording();
     }
     
-    isPaused_ = true;
     emit recordingStateChanged(true, true);
     std::cout << "[Logic] Recording paused." << std::endl;
 }
 
 void RealtimeTranscriptionController::resumeRecording() {
-    if (!isRecording_ || !isPaused_) {
+    if (!isRecording_) {
         std::cout << "[WARNING] Cannot resume recording" << std::endl;
         return;
     }
@@ -398,7 +439,6 @@ void RealtimeTranscriptionController::resumeRecording() {
         audioManager_->resumeRecording();
     }
     
-    isPaused_ = false;
     emit recordingStateChanged(true, false);
     std::cout << "[Logic] Recording resumed." << std::endl;
 }
@@ -514,7 +554,7 @@ void RealtimeAsrCallback::onOpen(Asr::AsrClient* client) {
     (void)client; // 未使用
     std::cout << "[DEBUG] ASR connection opened" << std::endl;
     if (controller_) {
-        emit controller_->asrConnectionStatusChanged(true);
+        emit controller_->onAsrConnectionStatusChanged(true);
     }
 }
 
@@ -522,7 +562,7 @@ void RealtimeAsrCallback::onClose(Asr::AsrClient* client) {
     (void)client; // 未使用
     std::cout << "[DEBUG] ASR connection closed" << std::endl;
     if (controller_) {
-        emit controller_->asrConnectionStatusChanged(false);
+        emit controller_->onAsrConnectionStatusChanged(false);
     }
 }
 
@@ -576,7 +616,7 @@ void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
                 }
                 utterList.append(map);
             }
-            emit controller_->asrUtterancesUpdated(utterList);
+            emit controller_->onAsrUtterancesUpdated(utterList);
         } else if (resultObj.contains("text")) {
             QString text = resultObj["text"].toString();
             bool isFinal = resultObj.contains("is_final") ? resultObj.value("is_final").toBool() : false;
@@ -587,12 +627,12 @@ void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
             }
             
             std::cout << "[DEBUG] 提取到text: " << text.toStdString() << ", isFinal: " << isFinal << std::endl;
-            emit controller_->asrTranscriptionUpdated(text, isFinal);
+            emit controller_->onAsrTranscriptionUpdated(text, isFinal);
         }
         
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] Failed to parse ASR message: " << e.what() << std::endl;
-        emit controller_->asrError(QString("Failed to parse ASR message: %1").arg(e.what()));
+        emit controller_->onAsrError(QString("Failed to parse ASR message: %1").arg(e.what()));
     }
 }
 
@@ -600,7 +640,7 @@ void RealtimeAsrCallback::onError(Asr::AsrClient* client, const std::string& err
     (void)client; // 未使用
     std::cerr << "[ERROR] ASR error: " << error << std::endl;
     if (controller_) {
-        emit controller_->asrError(QString::fromStdString(error));
+        emit controller_->onAsrError(QString::fromStdString(error));
     }
 }
 
@@ -612,9 +652,9 @@ void RealtimeTranscriptionController::enableRealtimeAsr(bool enable) {
     realtimeAsrEnabled_ = enable;
     std::cout << "[DEBUG] Realtime ASR enabled: " << (enable ? "true" : "false") << std::endl;
     
-    if (enable && realtimeAsrManager_) {
+    if (enable && asrManager_) {
         // **关键修复：配置正确的音频格式和连接参数**
-        Asr::AsrConfig asrConfig = realtimeAsrManager_->getConfig();
+        Asr::AsrConfig asrConfig = asrManager_->getConfig();
         asrConfig.sampleRate = 16000;
         asrConfig.channels = 1;
         asrConfig.format = "pcm";  // 实时流使用pcm格式
@@ -623,30 +663,50 @@ void RealtimeTranscriptionController::enableRealtimeAsr(bool enable) {
         asrConfig.segDuration = 100;  // 100ms分包
         asrConfig.enableBusinessLog = true;  // 启用业务日志
         asrConfig.enableFlowLog = true;      // 启用流程日志
-        realtimeAsrManager_->setConfig(asrConfig);
+        asrManager_->setConfig(asrConfig);
         
         // **关键修复：确保先连接再启动识别**
-        if (!realtimeAsrManager_->connect()) {
+        if (!asrManager_->connect()) {
             std::cerr << "[ERROR] Failed to connect to ASR service" << std::endl;
             emit asrError("Failed to connect to ASR service");
             return;
         }
         
         // 启动流式识别会话
-        if (realtimeAsrManager_->startRecognition()) {
+        if (asrManager_->startRecognition()) {
             std::cout << "[DEBUG] ASR streaming recognition started" << std::endl;
-            emit asrConnectionStatusChanged(true);
+            emit onAsrConnectionStatusChanged(true);
         } else {
             std::cerr << "[ERROR] Failed to start ASR streaming recognition" << std::endl;
             emit asrError("Failed to start ASR streaming recognition");
-            realtimeAsrManager_->disconnect();
+            asrManager_->disconnect();
         }
-    } else if (!enable && realtimeAsrManager_) {
+    } else if (!enable && asrManager_) {
         // 停止流式识别
-        realtimeAsrManager_->stopRecognition();
-        realtimeAsrManager_->disconnect();
+        asrManager_->stopRecognition();
+        asrManager_->disconnect();
         std::cout << "[DEBUG] ASR streaming recognition stopped" << std::endl;
-        emit asrConnectionStatusChanged(false);
+        emit onAsrConnectionStatusChanged(false);
+    }
+}
+
+// ============================================================================
+// ASR线程状态判断和启动/关闭接口实现
+// ============================================================================
+
+bool RealtimeTranscriptionController::isAsrThreadRunning() const {
+    return realtimeAsrEnabled_ && asrManager_ && asrManager_->isConnected();
+}
+
+void RealtimeTranscriptionController::startAsrThread() {
+    if (!isAsrThreadRunning()) {
+        enableRealtimeAsr(true);
+    }
+}
+
+void RealtimeTranscriptionController::stopAsrThread() {
+    if (isAsrThreadRunning()) {
+        enableRealtimeAsr(false);
     }
 }
 
@@ -657,12 +717,12 @@ void RealtimeTranscriptionController::enableRealtimeAsr(bool enable) {
 void RealtimeTranscriptionController::processAsrAudio(const void* data, size_t frameCount) {
     std::lock_guard<std::mutex> lock(asrMutex_);
     
-    if (!realtimeAsrEnabled_ || !realtimeAsrManager_) {
+    if (!realtimeAsrEnabled_ || !asrManager_) {
         return;
     }
     
     // 检查ASR连接状态
-    if (!realtimeAsrManager_->isConnected()) {
+    if (!asrManager_->isConnected()) {
         std::cout << "[DEBUG] ASR not connected, skipping audio processing" << std::endl;
         return;
     }
@@ -701,11 +761,11 @@ void RealtimeTranscriptionController::processAsrAudio(const void* data, size_t f
 }
 
 void RealtimeTranscriptionController::sendAsrAudioPacket(const std::vector<uint8_t>& audioData, bool isLast) {
-    if (!realtimeAsrManager_) {
+    if (!asrManager_) {
         return;
     }
     
-    if (realtimeAsrManager_->sendAudio(audioData, isLast)) {
+    if (asrManager_->sendAudio(audioData, isLast)) {
         std::cout << "[DEBUG] ASR audio packet sent: " << audioData.size() << " bytes" << std::endl;
     } else {
         std::cerr << "[ERROR] Failed to send ASR audio packet" << std::endl;

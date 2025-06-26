@@ -33,15 +33,17 @@ public:
      * @brief 析构函数，确保在对象销毁时停止音频流
      */
     ~Impl() {
-        std::cout << "[DEBUG] ~AudioThread::Impl called" << std::endl;
         try {
             stop();
+            if (stream_) {
+                Pa_CloseStream(stream_);
+                stream_ = nullptr;
+            }
         } catch (const std::exception& e) {
-            std::cerr << "[ERROR] Exception in AudioThread destructor: " << e.what() << std::endl;
+            std::cerr << "[AUDIO-THREAD][ERROR] Exception in AudioThread destructor: " << e.what() << std::endl;
         } catch (...) {
-            std::cerr << "[ERROR] Unknown exception in AudioThread destructor" << std::endl;
+            std::cerr << "[AUDIO-THREAD][ERROR] Unknown exception in AudioThread destructor" << std::endl;
         }
-        std::cout << "[DEBUG] ~AudioThread::Impl completed" << std::endl;
     }
 
     /**
@@ -67,53 +69,55 @@ public:
      * @throws std::runtime_error 当音频流启动失败时抛出异常
      */
     void start() {
-        if (running_) return;
-
-        std::cout << "[DEBUG] Starting audio thread..." << std::endl;
-        std::cout << "[DEBUG] Input device: index=" << inputParams_.device 
-                  << ", channels=" << inputParams_.channelCount 
-                  << ", sampleRate=" << static_cast<int>(config_.sampleRate) << std::endl;
-
-        // 检查输入设备是否有效
-        if (hasInputDevice_) {
-            const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(inputParams_.device);
-            if (!deviceInfo) {
-                std::cerr << "[ERROR] Invalid input device index: " << inputParams_.device << std::endl;
-                throw std::runtime_error("Invalid input device index");
-            }
-            std::cout << "[DEBUG] Input device info: " << deviceInfo->name << std::endl;
+        if (running_) {
+            return;
         }
-
+        
+        // 验证输入设备索引
+        if (inputParams_.device < 0 || inputParams_.device >= Pa_GetDeviceCount()) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Invalid input device index: " << inputParams_.device << std::endl;
+            return;
+        }
+        
+        // 获取设备信息
+        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(inputParams_.device);
+        if (!deviceInfo) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to get device info for device " << inputParams_.device << std::endl;
+            return;
+        }
+        
+        // 验证设备支持输入
+        if (deviceInfo->maxInputChannels == 0) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Device " << inputParams_.device << " does not support input" << std::endl;
+            return;
+        }
+        
         // 打开音频流
-        std::cout << "[DEBUG] Opening audio stream with device index: " << inputParams_.device << std::endl;
-        PaError err = Pa_OpenStream(
-            &stream_,
-            hasInputDevice_ ? &inputParams_ : nullptr,
-            hasOutputDevice_ ? &outputParams_ : nullptr,
-            static_cast<double>(config_.sampleRate),
-            config_.framesPerBuffer,
-            paClipOff,
-            audioCallback,
-            this
-        );
-
+        PaError err = Pa_OpenStream(&stream_,
+                                   &inputParams_,  // 输入参数
+                                   nullptr,        // 输出参数（无输出）
+                                   static_cast<double>(config_.sampleRate),
+                                   config_.framesPerBuffer,
+                                   paClipOff,      // 不裁剪
+                                   audioCallback,
+                                   this);
+        
         if (err != paNoError) {
-            std::cerr << "[ERROR] Failed to open stream: " << Pa_GetErrorText(err) << std::endl;
-            throw std::runtime_error("Failed to open stream: " + std::string(Pa_GetErrorText(err)));
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to open stream: " << Pa_GetErrorText(err) << std::endl;
+            return;
         }
-
+        
         // 启动音频流
-        std::cout << "[DEBUG] Starting audio stream..." << std::endl;
         err = Pa_StartStream(stream_);
         if (err != paNoError) {
-            std::cerr << "[ERROR] Failed to start stream: " << Pa_GetErrorText(err) << std::endl;
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to start stream: " << Pa_GetErrorText(err) << std::endl;
             Pa_CloseStream(stream_);
             stream_ = nullptr;
-            throw std::runtime_error("Failed to start stream: " + std::string(Pa_GetErrorText(err)));
+            return;
         }
-
+        
         running_ = true;
-        std::cout << "[DEBUG] Audio thread started successfully" << std::endl;
+        std::cout << "[AUDIO-THREAD] Audio stream started successfully" << std::endl;
     }
 
     /**

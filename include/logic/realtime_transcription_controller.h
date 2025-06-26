@@ -68,6 +68,11 @@ public:
     void enableRealtimeAsr(bool enable);
     bool isRealtimeAsrEnabled() const { return realtimeAsrEnabled_; }
     
+    // 新增：ASR线程状态判断和启动/关闭接口
+    bool isAsrThreadRunning() const;
+    void startAsrThread();
+    void stopAsrThread();
+    
     // 转录文本管理
     void setCumulativeTranscriptionText(const QString& text) { cumulativeTranscriptionText_ = text; }
     QString getCumulativeTranscriptionText() const { return cumulativeTranscriptionText_; }

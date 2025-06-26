@@ -55,9 +55,17 @@ public:
      * @details 关闭设备并终止PortAudio
      */
     ~Impl() {
-        std::cout << "[DEBUG] ~AudioDevice::Impl called" << std::endl;
-        closeDevice();
-        Pa_Terminate();
+        std::cout << "[AUDIO-THREAD] ~AudioDevice::Impl called" << std::endl;
+        try {
+            stopStream();
+            if (stream_) {
+                Pa_CloseStream(stream_.get());
+                stream_.reset();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Exception in AudioDevice::Impl destructor: " << e.what() << std::endl;
+        }
+        std::cout << "[AUDIO-THREAD] ~AudioDevice::Impl completed" << std::endl;
     }
 
     //--------------------------------------------------------------------------
@@ -120,7 +128,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         try {
             if (stream_) {
-                std::cout << "[DEBUG] Device already open, closing current device first..." << std::endl;
+                std::cout << "[AUDIO-THREAD] Device already open, closing current device first..." << std::endl;
                 closeDevice();
             }
 
@@ -175,8 +183,8 @@ public:
             }
 
             // 打开音频流
-            std::cout << "[DEBUG] Opening audio stream with device: " << device.name << std::endl;
-            std::cout << "[DEBUG] Stream parameters:" << std::endl;
+            std::cout << "[AUDIO-THREAD] Opening audio stream with device: " << device.name << std::endl;
+            std::cout << "[AUDIO-THREAD] Stream parameters:" << std::endl;
             std::cout << "  - Device index: " << inputParameters.device << std::endl;
             std::cout << "  - Channels: " << inputParameters.channelCount << std::endl;
             std::cout << "  - Sample format: " << inputParameters.sampleFormat << std::endl;
@@ -253,24 +261,27 @@ public:
      * @return 是否成功启动
      */
     bool startStream() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        try {
-            if (!stream_) {
-                lastError_ = "No active stream";
-                return false;
-            }
-            
-            std::cout << "[DEBUG] Starting audio stream..." << std::endl;
-            PaError err = Pa_StartStream(stream_.get());
-            if (err != paNoError) {
-                lastError_ = "Failed to start stream: " + std::string(Pa_GetErrorText(err));
-                return false;
-            }
-            return true;
-        } catch (const std::exception& e) {
-            lastError_ = e.what();
+        if (!isOpen_ || !stream_) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Cannot start stream: device not open" << std::endl;
             return false;
         }
+        
+        if (isStreaming_) {
+            std::cout << "[AUDIO-THREAD] Stream already running" << std::endl;
+            return true;
+        }
+        
+        std::cout << "[AUDIO-THREAD] Starting audio stream..." << std::endl;
+        
+        PaError err = Pa_StartStream(stream_.get());
+        if (err != paNoError) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to start stream: " << Pa_GetErrorText(err) << std::endl;
+            return false;
+        }
+        
+        isStreaming_ = true;
+        std::cout << "[AUDIO-THREAD] Audio stream started successfully" << std::endl;
+        return true;
     }
 
     /**
@@ -279,36 +290,44 @@ public:
      * @throw std::runtime_error 如果停止失败
      */
     bool stopStream() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        try {
-            if (!stream_) {
-                lastError_ = "No active stream";
-                return false;
-            }
-            
-            std::cout << "[DEBUG] Stopping audio stream..." << std::endl;
-            PaError err = Pa_StopStream(stream_.get());
-            if (err != paNoError) {
-                lastError_ = "Failed to stop stream: " + std::string(Pa_GetErrorText(err));
-                return false;
-            }
-            return true;
-        } catch (const std::exception& e) {
-            lastError_ = e.what();
+        if (!isStreaming_ || !stream_) {
             return false;
         }
+        
+        std::cout << "[AUDIO-THREAD] Stopping audio stream..." << std::endl;
+        
+        PaError err = Pa_StopStream(stream_.get());
+        if (err != paNoError) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to stop stream: " << Pa_GetErrorText(err) << std::endl;
+        } else {
+            std::cout << "[AUDIO-THREAD] Audio stream stopped successfully" << std::endl;
+        }
+        
+        isStreaming_ = false;
+        return true;
     }
 
     /**
      * @brief 关闭当前设备
      */
     void closeDevice() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (stream_) {
-            std::cout << "[DEBUG] Closing audio stream..." << std::endl;
-            Pa_CloseStream(stream_.get());
-            stream_.reset();
+        if (!isOpen_ || !stream_) {
+            return;
         }
+        
+        std::cout << "[AUDIO-THREAD] Closing audio stream..." << std::endl;
+        
+        stopStream();
+        
+        PaError err = Pa_CloseStream(stream_.get());
+        if (err != paNoError) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Failed to close stream: " << Pa_GetErrorText(err) << std::endl;
+        } else {
+            std::cout << "[AUDIO-THREAD] Audio stream closed successfully" << std::endl;
+        }
+        
+        stream_.reset();
+        isOpen_ = false;
     }
 
     //--------------------------------------------------------------------------
@@ -435,6 +454,8 @@ private:
     AudioConfig currentConfig_;  // 当前音频配置
     DeviceInfo currentDevice_;  // 当前设备信息
     std::string lastError_;  // 最后一次错误信息
+    bool isOpen_ = false;  // 设备是否打开
+    bool isStreaming_ = false;  // 音频流是否正在运行
 };
 
 //==============================================================================
@@ -442,7 +463,9 @@ private:
 //==============================================================================
 
 AudioDevice::AudioDevice() : impl_(std::make_unique<Impl>()) {}
-AudioDevice::~AudioDevice() { std::cout << "[DEBUG] ~AudioDevice called" << std::endl; }
+AudioDevice::~AudioDevice() { 
+    std::cout << "[AUDIO-THREAD] ~AudioDevice called" << std::endl; 
+}
 
 bool AudioDevice::initialize() { return impl_->initialize(); }
 std::vector<DeviceInfo> AudioDevice::getAvailableDevices() { return impl_->getAvailableDevices(); }

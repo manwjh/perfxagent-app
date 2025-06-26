@@ -6,8 +6,7 @@
 
 #include "asr/asr_client.h"
 #include "asr/asr_log_utils.h"
-#include "asr/asr_manager.h"
-#include "asr/asr_debug_config.h"
+#include "asr/secure_key_manager.h"  // 使用ASR命名空间的SecureKeyManager
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -35,24 +34,32 @@ namespace Asr {
 // AsrClient 类实现
 // ============================================================================
 
-AsrClient::AsrClient() 
-    : m_connected(false)
-    , m_authType(AuthType::TOKEN)
-    , m_format("raw")
-    , m_sampleRate(16000)
-    , m_bits(16)
-    , m_channels(1)
-    , m_codec("raw")
-    , m_seq(1)
-    , m_uid("test")
-    , m_language("zh-CN")
-    , m_resultType("full")
-    , m_streaming(true)
-    , m_segDuration(100)
-    , m_callback(nullptr)
-    , m_readyForAudio(false)
-    , m_finalResponseReceived(false)
-{
+AsrClient::AsrClient() : m_connected(false), m_seq(0), m_callback(nullptr), m_readyForAudio(false) {
+    std::cout << "[ASR-CRED] AsrClient constructor called" << std::endl;
+    
+    // 设置WebSocket回调
+    m_webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
+        this->handleMessage(msg);
+    });
+    
+    // 注意：ix::WebSocket没有setOnOpenCallback、setOnCloseCallback、setOnErrorCallback方法
+    // 这些事件都在handleMessage中处理
+    
+    std::cout << "[ASR-CRED] AsrClient constructor completed" << std::endl;
+    
+    m_authType = AuthType::TOKEN;
+    m_format = "raw";
+    m_sampleRate = 16000;
+    m_bits = 16;
+    m_channels = 1;
+    m_codec = "raw";
+    m_uid = "test";
+    m_language = "zh-CN";
+    m_resultType = "full";
+    m_streaming = true;
+    m_segDuration = 100;
+    m_finalResponseReceived = false;
+    
     // 生成唯一的请求ID
     m_reqId = generateUuid();
     
@@ -71,7 +78,22 @@ AsrClient::AsrClient()
 }
 
 AsrClient::~AsrClient() {
-    disconnect();
+    std::cout << "[ASR-THREAD] Destroying AsrClient..." << std::endl;
+    
+    try {
+        // 断开WebSocket连接
+        if (m_webSocket.getReadyState() == ix::ReadyState::Open) {
+            std::cout << "[ASR-THREAD] Closing WebSocket connection..." << std::endl;
+            m_webSocket.close();
+            std::cout << "[ASR-THREAD] WebSocket connection closed" << std::endl;
+        }
+        
+        std::cout << "[ASR-THREAD] AsrClient destroyed successfully" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[ASR-THREAD][ERROR] Exception in AsrClient destructor: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "[ASR-THREAD][ERROR] Unknown exception in AsrClient destructor" << std::endl;
+    }
 }
 
 // ============================================================================
@@ -137,36 +159,44 @@ void AsrClient::setSegDuration(int duration) {
 // ============================================================================
 
 bool AsrClient::connect() {
-    if (m_connected) {
-        logWithTimestamp("ASR client is already connected");
-        return true;
-    }
+    std::cout << "[ASR-CRED] Attempting to connect to ASR service..." << std::endl;
     
-    logWithTimestamp("🔗 正在连接 WebSocket...");
-    logWithTimestamp("📡 目标URL: " + m_webSocket.getUrl());
-    
-    // 打印发送的 Header 信息
-    logWithTimestamp("=== 发送的 HTTP Header ===");
-    logWithTimestamp("X-Api-Resource-Id: volc.bigasr.sauc.duration");
-    logWithTimestamp("X-Api-Access-Key: " + (m_accessToken.length() > 8 ? m_accessToken.substr(0, 4) + "****" + m_accessToken.substr(m_accessToken.length() - 4) : "****"));
-    logWithTimestamp("X-Api-App-Key: " + m_appId);
-    logWithTimestamp("X-Api-Request-Id: " + m_reqId);
-    
-    m_webSocket.start();
-    
-    // 等待连接建立
-    int timeout = 0;
-    while (!m_connected && timeout < 300) { // 30秒超时
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        timeout++;
-        
-        // 每5秒打印一次等待信息
-        if (timeout % 50 == 0) {
-            logWithTimestamp("⏳ 等待连接建立... (" + std::to_string(timeout / 10) + "秒)");
+    try {
+        // 检查是否已经连接
+        if (m_webSocket.getReadyState() == ix::ReadyState::Open) {
+            std::cout << "[ASR-CRED] Already connected to ASR service" << std::endl;
+            return true;
         }
+
+        logWithTimestamp("🔗 正在连接 WebSocket...");
+        logWithTimestamp("📡 目标URL: " + m_webSocket.getUrl());
+        
+        // 打印发送的 Header 信息
+        logWithTimestamp("=== 发送的 HTTP Header ===");
+        logWithTimestamp("X-Api-Resource-Id: volc.bigasr.sauc.duration");
+        logWithTimestamp("X-Api-Access-Key: " + (m_accessToken.length() > 8 ? m_accessToken.substr(0, 4) + "****" + m_accessToken.substr(m_accessToken.length() - 4) : "****"));
+        logWithTimestamp("X-Api-App-Key: " + m_appId);
+        logWithTimestamp("X-Api-Request-Id: " + m_reqId);
+        
+        m_webSocket.start();
+        
+        // 等待连接建立
+        int timeout = 0;
+        while (!m_connected && timeout < 300) { // 30秒超时
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            timeout++;
+            
+            // 每5秒打印一次等待信息
+            if (timeout % 50 == 0) {
+                logWithTimestamp("⏳ 等待连接建立... (" + std::to_string(timeout / 10) + "秒)");
+            }
+        }
+        
+        return m_connected;
+    } catch (const std::exception& e) {
+        logErrorWithTimestamp("❌ 连接到ASR服务失败: " + std::string(e.what()));
+        return false;
     }
-    
-    return m_connected;
 }
 
 void AsrClient::disconnect() {
@@ -343,30 +373,59 @@ std::string AsrClient::getFullClientRequestJson() const {
 // ============================================================================
 
 AsrClient::Credentials AsrClient::getCredentialsFromEnv() {
+    // ============================================================================
+    // API密钥凭据获取 - 支持多种配置方式
+    // ============================================================================
+    // 配置优先级：
+    // 1. 环境变量 ASR_* (用户自定义，优先级最高)
+    // 2. 混淆配置 (厂商提供，体验模式)
+    // ============================================================================
+    
     Credentials creds;
     
-    // 从环境变量获取凭据
-    const char* appId = std::getenv("VOLC_APP_ID");
-    const char* accessToken = std::getenv("VOLC_ACCESS_TOKEN");
-    const char* secretKey = std::getenv("VOLC_SECRET_KEY");
+    std::cout << "🔍 [AsrClient] 开始获取API密钥配置..." << std::endl;
+    
+    // 第一优先级：检查用户自定义的ASR_前缀环境变量
+    const char* appId = std::getenv("ASR_APP_ID");
+    const char* accessToken = std::getenv("ASR_ACCESS_TOKEN");
+    const char* secretKey = std::getenv("ASR_SECRET_KEY");
     
     if (appId && accessToken) {
+        // 使用用户环境变量配置（优先级最高）
         creds.appId = appId;
         creds.accessToken = accessToken;
         creds.secretKey = secretKey ? secretKey : "";
         creds.isValid = true;
         
-        logWithTimestamp("✅ 使用环境变量中的凭据");
+        std::cout << "✅ [AsrClient] 使用环境变量中的用户配置" << std::endl;
+        std::cout << "   - 配置来源: ASR_* 环境变量" << std::endl;
+        std::cout << "   - App ID: " << appId << std::endl;
+        std::cout << "   - Access Token: " << accessToken << std::endl;
+        std::cout << "   - Secret Key: " << (secretKey ? secretKey : "未设置") << std::endl;
+        std::cout << "   - 优先级: 最高 (用户自定义)" << std::endl;
     } else {
-        // 使用默认凭据（仅用于测试）
-        creds.appId = "8388344882";
-        creds.accessToken = "vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3";
-        creds.secretKey = "";
+        // 第二优先级：使用厂商提供的混淆配置（体验模式）
+        std::cout << "⚠️  [AsrClient] 环境变量未设置，使用体验模式配置" << std::endl;
+        std::cout << "💡 建议设置环境变量：ASR_APP_ID, ASR_ACCESS_TOKEN, ASR_SECRET_KEY" << std::endl;
+        
+        // 使用SecureKeyManager获取混淆的API密钥（体验模式）
+        creds.appId = Asr::SecureKeyManager::getAppId();
+        creds.accessToken = Asr::SecureKeyManager::getAccessToken();
+        creds.secretKey = Asr::SecureKeyManager::getSecretKey();
         creds.isValid = true;
         
-        logWithTimestamp("⚠️  使用默认凭据（仅用于测试）");
-        logWithTimestamp("💡 建议设置环境变量：VOLC_APP_ID, VOLC_ACCESS_TOKEN, VOLC_SECRET_KEY");
+        std::cout << "🎯 [AsrClient] 体验模式：使用厂商混淆配置" << std::endl;
+        std::cout << "   - 配置来源: 厂商混淆配置" << std::endl;
+        std::cout << "   - 生成工具: scripts/generate_obfuscated_keys.py" << std::endl;
+        std::cout << "   - 优先级: 最低 (体验模式)" << std::endl;
+        std::cout << "   - 注意: 有使用次数限制，建议配置自己的密钥" << std::endl;
     }
+    
+    std::cout << "🔍 [AsrClient] API密钥配置获取完成" << std::endl;
+    std::cout << "   - 配置有效: " << (creds.isValid ? "是" : "否") << std::endl;
+    std::cout << "   - App ID长度: " << creds.appId.length() << std::endl;
+    std::cout << "   - Access Token长度: " << creds.accessToken.length() << std::endl;
+    std::cout << "   - Secret Key长度: " << creds.secretKey.length() << std::endl;
     
     return creds;
 }
@@ -1253,6 +1312,12 @@ AsrClient::AudioFileInfo AsrClient::parsePcmFile(const std::string& filePath, co
     std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
     
     return info;
+}
+
+bool AsrClient::testHandshake() {
+    bool connected = this->connect();
+    this->disconnect();
+    return connected;
 }
 
 } // namespace Asr 

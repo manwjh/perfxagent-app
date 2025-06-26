@@ -61,6 +61,7 @@ target_link_libraries(perfx_audio PUBLIC
 # 添加 IXWebSocket 版本的 ASR 库
 add_library(perfx_asr_client STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/asr/asr_client.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/asr/secure_key_manager.cpp
     ${CMAKE_SOURCE_DIR}/include/asr/asr_client.h
 )
 
@@ -100,22 +101,33 @@ target_link_libraries(perfx_asr_manager PUBLIC
     nlohmann_json::nlohmann_json
 )
 
+# 添加Qt资源文件
+qt6_add_resources(APP_RESOURCES "${CMAKE_SOURCE_DIR}/resources/resources.qrc")
+
 # 添加主应用程序
 set(HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/main_window.h
     ${CMAKE_SOURCE_DIR}/include/ui/audio_to_text_window.h
     ${CMAKE_SOURCE_DIR}/include/ui/realtime_audio_to_text_window.h
+    ${CMAKE_SOURCE_DIR}/include/ui/system_config_window.h
+    ${CMAKE_SOURCE_DIR}/include/ui/about_project_widget.h
+    ${CMAKE_SOURCE_DIR}/include/ui/config_manager.h
+    ${CMAKE_SOURCE_DIR}/include/ui/global_state.h
     ${CMAKE_SOURCE_DIR}/include/logic/realtime_transcription_controller.h
     ${CMAKE_SOURCE_DIR}/include/ui/app_icon_button.h
 )
 
 # 确保 icon 文件被加到 bundle
-set(APP_ICON_MACOS "${CMAKE_SOURCE_DIR}/resources/icons/app_icon.icns")
+set(APP_ICON_MACOS "${CMAKE_SOURCE_DIR}/resources/packaging/macos/app_icon.icns")
 set(SOURCES
     main.cpp
     ui/main_window.cpp
     ui/audio_to_text_window.cpp
     ui/realtime_audio_to_text_window.cpp
+    ui/system_config_window.cpp
+    ui/about_project_widget.cpp
+    ui/config_manager.cpp
+    ui/global_state.cpp
     logic/realtime_transcription_controller.cpp
     ui/app_icon_button.cpp
     ${HEADERS}
@@ -125,6 +137,7 @@ set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION
 
 add_executable(perfxagent-app
     ${SOURCES}
+    ${APP_RESOURCES}
 )
 
 # 设置主应用程序的包含目录
@@ -179,7 +192,7 @@ set_target_properties(perfxagent-app PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.perfx.agent.asr"
     MACOSX_BUNDLE_BUNDLE_VERSION ${PERFXAGENT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PERFXAGENT_VERSION}
-    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/scripts/platforms/macos/MacOSXBundleInfo.plist.in
     MACOSX_BUNDLE_ICON_FILE "app_icon.icns"
     OUTPUT_NAME "PerfxAgent-ASR"
 ) 

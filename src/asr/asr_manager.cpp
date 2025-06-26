@@ -4,6 +4,7 @@
 #include "asr/asr_manager.h"
 #include "asr/asr_log_utils.h"
 #include "asr/asr_client.h"
+#include "ui/config_manager.h"  // 添加SecureKeyManager的头文件
 #include <iostream>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
@@ -17,6 +18,8 @@
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <filesystem>
+#include <mutex>
 
 using json = nlohmann::json;
 
@@ -201,11 +204,18 @@ bool AsrManager::connect() {
     updateStatus(AsrStatus::CONNECTED);
     logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR 连接成功");
     
+    // 启动会话计时器
+    startSessionTimer();
+    
     return true;
 }
 
 void AsrManager::disconnect() {
     logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 开始断开 ASR 连接...");
+    
+    // 结束会话计时器
+    endSessionTimer(true);
+    
     if (m_client) {
         m_client->disconnect();
         logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR 客户端已断开");
@@ -410,10 +420,11 @@ bool AsrManager::loadConfigFromEnv(AsrConfig& config) {
         config.accessToken = accessToken;
         config.secretKey = secretKey ? secretKey : "";
         config.isValid = true;
+        config.configSource = "environment_variables";
         
         std::cout << "🔐 使用环境变量中的凭据" << std::endl;
     } else {
-        std::cout << "⚠️  环境变量未设置，使用默认凭据（仅用于测试）" << std::endl;
+        std::cout << "⚠️  环境变量未设置，使用体验模式配置" << std::endl;
         std::cout << "   建议设置环境变量：" << std::endl;
         std::cout << "   export ASR_APP_ID=your_app_id" << std::endl;
         std::cout << "   export ASR_ACCESS_TOKEN=your_access_token" << std::endl;
@@ -423,11 +434,15 @@ bool AsrManager::loadConfigFromEnv(AsrConfig& config) {
         std::cout << "   export VOLC_ACCESS_TOKEN=your_access_token" << std::endl;
         std::cout << "   export VOLC_SECRET_KEY=your_secret_key" << std::endl;
         
-        // 使用默认凭据（仅用于测试）
-        config.appId = "8388344882";
-        config.accessToken = "vQWuOVrgH6J0kCAQoHcQZ_wZfA5q2lG3";
-        config.secretKey = "oKzfTdLm0M2dVUXUKW86jb-hFLGPmG3e";
+        // 使用SecureKeyManager获取混淆的API密钥（体验模式）
+        config.appId = perfx::ui::SecureKeyManager::getAppId();
+        config.accessToken = perfx::ui::SecureKeyManager::getAccessToken();
+        config.secretKey = perfx::ui::SecureKeyManager::getSecretKey();
         config.isValid = true;
+        config.configSource = "trial_mode";
+        
+        // 检查体验模式使用限制
+        std::cout << "🎯 体验模式：请确保使用次数未超过限制" << std::endl;
     }
     
     // 加载日志配置
@@ -443,25 +458,7 @@ bool AsrManager::loadConfigFromEnv(AsrConfig& config) {
     if (protocolLog) config.enableProtocolLog = (std::string(protocolLog) == "1");
     if (audioLog) config.enableAudioLog = (std::string(audioLog) == "1");
     
-    // 脱敏显示凭据信息
-    std::string maskedToken = config.accessToken;
-    if (maskedToken.length() > 8) {
-        maskedToken = maskedToken.substr(0, 4) + "****" + maskedToken.substr(maskedToken.length() - 4);
-    }
-    
-    std::string maskedSecret = config.secretKey;
-    if (maskedSecret.length() > 8) {
-        maskedSecret = maskedSecret.substr(0, 4) + "****" + maskedSecret.substr(maskedSecret.length() - 4);
-    } else {
-        maskedSecret = "****";
-    }
-    
-    std::cout << "📋 凭据信息:" << std::endl;
-    std::cout << "   - App ID: " << config.appId << std::endl;
-    std::cout << "   - Access Token: " << maskedToken << std::endl;
-    std::cout << "   - Secret Key: " << maskedSecret << std::endl;
-    
-    return config.isValid;
+    return true;
 }
 
 std::string AsrManager::getClientTypeName(ClientType type) {
@@ -560,6 +557,79 @@ void AsrManager::updateStatus(AsrStatus status) {
     // 流程日志
     if (m_config.enableFlowLog) {
         logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📊 ASR 状态更新: " + getStatusName(status));
+    }
+}
+
+// =================== ASR连接测试 ===================
+bool AsrManager::testConnection(const std::string& appId, const std::string& accessToken, const std::string& secretKey) {
+    // 参数验证
+    if (appId.empty()) {
+        logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ 测试连接失败：应用ID为空", true);
+        return false;
+    }
+    
+    if (accessToken.empty()) {
+        logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ 测试连接失败：访问令牌为空", true);
+        return false;
+    }
+    
+    if (secretKey.empty()) {
+        logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ 测试连接失败：密钥为空", true);
+        return false;
+    }
+    
+    logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "🔍 开始ASR连接测试...");
+    logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "📋 测试参数：");
+    logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "  - App ID: " + (appId.length() > 8 ? appId.substr(0, 4) + "****" + appId.substr(appId.length() - 4) : appId));
+    logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "  - Access Token: " + (accessToken.length() > 8 ? accessToken.substr(0, 4) + "****" + accessToken.substr(accessToken.length() - 4) : accessToken));
+    logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "  - Secret Key: " + (secretKey.length() > 8 ? secretKey.substr(0, 4) + "****" + secretKey.substr(secretKey.length() - 4) : secretKey));
+    
+    try {
+        std::unique_ptr<AsrClient> client = std::make_unique<AsrClient>();
+        client->setAppId(appId);
+        client->setToken(accessToken);
+        client->setSecretKey(secretKey);
+        
+        logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "🔗 尝试连接ASR服务...");
+        
+        // 调用testHandshake
+        bool result = client->testHandshake();
+        
+        if (result) {
+            logMessage(ASR_LOG_INFO, ASR_LOG_INFO, "✅ ASR连接测试成功！");
+        } else {
+            logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ ASR连接测试失败：握手失败", true);
+        }
+        
+        return result;
+    } catch (const std::exception& e) {
+        logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ ASR连接测试异常：" + std::string(e.what()), true);
+        return false;
+    } catch (...) {
+        logMessage(ASR_LOG_ERROR, ASR_LOG_ERROR, "❌ ASR连接测试发生未知异常", true);
+        return false;
+    }
+}
+
+// ============================================================================
+// ASR线程状态判断和启动/关闭接口实现
+// ============================================================================
+
+bool AsrManager::isAsrThreadRunning() const {
+    return isConnected() && (m_status == AsrStatus::CONNECTED || m_status == AsrStatus::RECOGNIZING);
+}
+
+void AsrManager::startAsrThread() {
+    if (!isAsrThreadRunning()) {
+        connect();
+        startRecognition();
+    }
+}
+
+void AsrManager::stopAsrThread() {
+    if (isAsrThreadRunning()) {
+        stopRecognition();
+        disconnect();
     }
 }
 
@@ -1489,6 +1559,511 @@ send_complete:
     m_status = AsrStatus::DISCONNECTED;
     logMessage(m_config.logLevel, ASR_LOG_INFO, "🏁 ASR识别线程已结束");
     m_stopFlag = false; // 线程结束时重置
+}
+
+// ============================================================================
+// 计时器相关方法实现
+// ============================================================================
+
+void AsrManager::startSessionTimer() {
+    if (!m_config.enableUsageTracking) {
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    
+    // 生成会话ID
+    m_currentSession_.sessionId = generateSessionId();
+    m_currentSession_.connectTime = std::chrono::system_clock::now();
+    m_currentSession_.isCompleted = false;
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "⏱️ 开始计时会话: " + m_currentSession_.sessionId);
+}
+
+void AsrManager::endSessionTimer(bool isCompleted) {
+    if (!m_config.enableUsageTracking) {
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    
+    if (m_currentSession_.connectTime.time_since_epoch().count() > 0) {
+        m_currentSession_.disconnectTime = std::chrono::system_clock::now();
+        m_currentSession_.isCompleted = isCompleted;
+        m_currentSession_.calculateDuration();
+        
+        // 获取当前日期
+        std::string currentDate = getCurrentDate();
+        
+        // 添加到每日统计
+        if (m_dailyStats_.find(currentDate) == m_dailyStats_.end()) {
+            m_dailyStats_[currentDate] = DailyUsageStats();
+            m_dailyStats_[currentDate].date = currentDate;
+        }
+        
+        m_dailyStats_[currentDate].addSession(m_currentSession_);
+        
+        // 更新总体统计
+        updateOverallStats();
+        
+        // 保存统计数据
+        saveStats();
+        
+        logMessage(m_config.logLevel, ASR_LOG_INFO, 
+                  "⏱️ 会话结束: " + m_currentSession_.sessionId + 
+                  " 持续时间: " + m_currentSession_.getFormattedDuration());
+        
+        // 重置当前会话
+        m_currentSession_ = ConnectionSession();
+    }
+}
+
+void AsrManager::updateOverallStats() {
+    m_overallStats_.totalDuration = std::chrono::milliseconds(0);
+    m_overallStats_.totalSessionCount = 0;
+    m_overallStats_.activeDays = m_dailyStats_.size();
+    
+    std::chrono::system_clock::time_point firstUsage = std::chrono::system_clock::now();
+    std::chrono::system_clock::time_point lastUsage = std::chrono::system_clock::time_point::min();
+    
+    for (const auto& pair : m_dailyStats_) {
+        const auto& dailyStats = pair.second;
+        m_overallStats_.totalDuration += dailyStats.totalDuration;
+        m_overallStats_.totalSessionCount += dailyStats.sessionCount;
+        
+        for (const auto& session : dailyStats.sessions) {
+            if (session.connectTime < firstUsage) {
+                firstUsage = session.connectTime;
+            }
+            if (session.disconnectTime > lastUsage) {
+                lastUsage = session.disconnectTime;
+            }
+        }
+    }
+    
+    if (m_overallStats_.totalSessionCount > 0) {
+        m_overallStats_.firstUsage = firstUsage;
+        m_overallStats_.lastUsage = lastUsage;
+    }
+}
+
+DailyUsageStats AsrManager::getTodayStats() const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    std::string today = getCurrentDate();
+    
+    auto it = m_dailyStats_.find(today);
+    if (it != m_dailyStats_.end()) {
+        return it->second;
+    }
+    
+    return DailyUsageStats();
+}
+
+DailyUsageStats AsrManager::getDateStats(const std::string& date) const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    
+    auto it = m_dailyStats_.find(date);
+    if (it != m_dailyStats_.end()) {
+        return it->second;
+    }
+    
+    return DailyUsageStats();
+}
+
+OverallStats AsrManager::getOverallStats() const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    return m_overallStats_;
+}
+
+std::vector<DailyUsageStats> AsrManager::getRecentStats(int days) const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    std::vector<DailyUsageStats> recentStats;
+    
+    auto now = std::chrono::system_clock::now();
+    auto today = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_today = std::localtime(&today);
+    
+    for (int i = 0; i < days; ++i) {
+        std::tm tm_date = *tm_today;
+        tm_date.tm_mday -= i;
+        std::mktime(&tm_date);
+        
+        std::stringstream ss;
+        ss << std::setfill('0') << std::setw(4) << (tm_date.tm_year + 1900) << "-"
+           << std::setfill('0') << std::setw(2) << (tm_date.tm_mon + 1) << "-"
+           << std::setfill('0') << std::setw(2) << tm_date.tm_mday;
+        
+        std::string dateStr = ss.str();
+        auto it = m_dailyStats_.find(dateStr);
+        if (it != m_dailyStats_.end()) {
+            recentStats.push_back(it->second);
+        } else {
+            // 添加空统计
+            DailyUsageStats emptyStats;
+            emptyStats.date = dateStr;
+            recentStats.push_back(emptyStats);
+        }
+    }
+    
+    return recentStats;
+}
+
+std::map<std::string, DailyUsageStats> AsrManager::getAllStats() const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    return m_dailyStats_;
+}
+
+ConnectionSession AsrManager::getCurrentSession() const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    return m_currentSession_;
+}
+
+bool AsrManager::saveStats() {
+    if (!m_config.enableUsageTracking) {
+        return true;
+    }
+    
+    try {
+        std::string filePath = getStatsFilePath();
+        std::string backupPath = getBackupFilePath();
+        
+        // 创建数据目录
+        if (!createDataDirectory()) {
+            return false;
+        }
+        
+        // 创建备份
+        if (std::filesystem::exists(filePath)) {
+            std::filesystem::copy_file(filePath, backupPath, std::filesystem::copy_options::overwrite_existing);
+        }
+        
+        // 保存统计数据
+        json statsData;
+        statsData["version"] = "1.0";
+        statsData["last_updated"] = getCurrentDate();
+        
+        // 保存总体统计
+        json overallStats;
+        overallStats["total_duration_ms"] = m_overallStats_.totalDuration.count();
+        overallStats["total_session_count"] = m_overallStats_.totalSessionCount;
+        overallStats["active_days"] = m_overallStats_.activeDays;
+        if (m_overallStats_.totalSessionCount > 0) {
+            overallStats["first_usage"] = formatTimePoint(m_overallStats_.firstUsage);
+            overallStats["last_usage"] = formatTimePoint(m_overallStats_.lastUsage);
+        }
+        statsData["overall_stats"] = overallStats;
+        
+        // 保存每日统计
+        json dailyStatsArray = json::array();
+        for (const auto& pair : m_dailyStats_) {
+            const auto& dailyStats = pair.second;
+            json dailyStat;
+            dailyStat["date"] = dailyStats.date;
+            dailyStat["total_duration_ms"] = dailyStats.totalDuration.count();
+            dailyStat["session_count"] = dailyStats.sessionCount;
+            
+            json sessionsArray = json::array();
+            for (const auto& session : dailyStats.sessions) {
+                json sessionData;
+                sessionData["session_id"] = session.sessionId;
+                sessionData["connect_time"] = formatTimePoint(session.connectTime);
+                sessionData["disconnect_time"] = formatTimePoint(session.disconnectTime);
+                sessionData["duration_ms"] = session.duration.count();
+                sessionData["is_completed"] = session.isCompleted;
+                sessionsArray.push_back(sessionData);
+            }
+            dailyStat["sessions"] = sessionsArray;
+            dailyStatsArray.push_back(dailyStat);
+        }
+        statsData["daily_stats"] = dailyStatsArray;
+        
+        // 写入文件
+        std::ofstream file(filePath);
+        if (!file.is_open()) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开统计文件进行写入: " + filePath, true);
+            return false;
+        }
+        
+        file << statsData.dump(2);
+        file.close();
+        
+        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "✅ 统计数据已保存到: " + filePath);
+        return true;
+        
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 保存统计数据失败: " + std::string(e.what()), true);
+        return false;
+    }
+}
+
+bool AsrManager::loadStats() {
+    if (!m_config.enableUsageTracking) {
+        return true;
+    }
+    
+    try {
+        std::string filePath = getStatsFilePath();
+        
+        if (!std::filesystem::exists(filePath)) {
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "ℹ️ 统计文件不存在，将创建新的统计记录");
+            return true;
+        }
+        
+        std::ifstream file(filePath);
+        if (!file.is_open()) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开统计文件: " + filePath, true);
+            return false;
+        }
+        
+        json statsData = json::parse(file);
+        file.close();
+        
+        // 清空现有数据
+        m_dailyStats_.clear();
+        
+        // 加载总体统计
+        if (statsData.contains("overall_stats")) {
+            const auto& overallStats = statsData["overall_stats"];
+            m_overallStats_.totalDuration = std::chrono::milliseconds(overallStats["total_duration_ms"].get<int64_t>());
+            m_overallStats_.totalSessionCount = overallStats["total_session_count"].get<int>();
+            m_overallStats_.activeDays = overallStats["active_days"].get<int>();
+            
+            if (overallStats.contains("first_usage")) {
+                // 这里可以添加时间解析逻辑
+            }
+            if (overallStats.contains("last_usage")) {
+                // 这里可以添加时间解析逻辑
+            }
+        }
+        
+        // 加载每日统计
+        if (statsData.contains("daily_stats")) {
+            for (const auto& dailyStatData : statsData["daily_stats"]) {
+                DailyUsageStats dailyStats;
+                dailyStats.date = dailyStatData["date"].get<std::string>();
+                dailyStats.totalDuration = std::chrono::milliseconds(dailyStatData["total_duration_ms"].get<int64_t>());
+                dailyStats.sessionCount = dailyStatData["session_count"].get<int>();
+                
+                for (const auto& sessionData : dailyStatData["sessions"]) {
+                    ConnectionSession session;
+                    session.sessionId = sessionData["session_id"].get<std::string>();
+                    session.duration = std::chrono::milliseconds(sessionData["duration_ms"].get<int64_t>());
+                    session.isCompleted = sessionData["is_completed"].get<bool>();
+                    
+                    // 这里可以添加时间解析逻辑
+                    // session.connectTime = parseTimePoint(sessionData["connect_time"]);
+                    // session.disconnectTime = parseTimePoint(sessionData["disconnect_time"]);
+                    
+                    dailyStats.sessions.push_back(session);
+                }
+                
+                m_dailyStats_[dailyStats.date] = dailyStats;
+            }
+        }
+        
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 统计数据已加载，共 " + std::to_string(m_dailyStats_.size()) + " 天的记录");
+        return true;
+        
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 加载统计数据失败: " + std::string(e.what()), true);
+        return false;
+    }
+}
+
+void AsrManager::clearStats() {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    
+    m_dailyStats_.clear();
+    m_overallStats_ = OverallStats();
+    m_currentSession_ = ConnectionSession();
+    
+    // 删除统计文件
+    std::string filePath = getStatsFilePath();
+    if (std::filesystem::exists(filePath)) {
+        std::filesystem::remove(filePath);
+    }
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🗑️ 所有统计数据已清除");
+}
+
+bool AsrManager::exportToCsv(const std::string& filePath) const {
+    try {
+        std::ofstream file(filePath);
+        if (!file.is_open()) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法创建CSV文件: " + filePath, true);
+            return false;
+        }
+        
+        // 写入CSV头部
+        file << "Date,Total Duration (ms),Session Count,Formatted Duration\n";
+        
+        // 写入每日统计数据
+        auto allStats = getAllStats();
+        for (const auto& pair : allStats) {
+            const auto& dailyStats = pair.second;
+            file << dailyStats.date << ","
+                 << dailyStats.totalDuration.count() << ","
+                 << dailyStats.sessionCount << ","
+                 << "\"" << dailyStats.getFormattedTotalDuration() << "\"\n";
+        }
+        
+        file.close();
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 统计数据已导出到CSV: " + filePath);
+        return true;
+        
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 导出CSV失败: " + std::string(e.what()), true);
+        return false;
+    }
+}
+
+std::string AsrManager::getStatsSummary() const {
+    std::lock_guard<std::mutex> lock(m_statsMutex_);
+    
+    std::stringstream ss;
+    ss << "=== ASR 使用统计摘要 ===" << std::endl;
+    ss << "总使用时长: " << m_overallStats_.getFormattedTotalDuration() << std::endl;
+    ss << "总会话次数: " << m_overallStats_.totalSessionCount << std::endl;
+    ss << "活跃天数: " << m_overallStats_.activeDays << std::endl;
+    
+    if (m_overallStats_.totalSessionCount > 0) {
+        ss << "首次使用: " << formatTimePoint(m_overallStats_.firstUsage) << std::endl;
+        ss << "最后使用: " << formatTimePoint(m_overallStats_.lastUsage) << std::endl;
+    }
+    
+    // 今日统计
+    std::string today = getCurrentDate();
+    auto it = m_dailyStats_.find(today);
+    if (it != m_dailyStats_.end()) {
+        ss << "今日使用时长: " << it->second.getFormattedTotalDuration() << std::endl;
+        ss << "今日会话次数: " << it->second.sessionCount << std::endl;
+    } else {
+        ss << "今日使用时长: 0s" << std::endl;
+        ss << "今日会话次数: 0" << std::endl;
+    }
+    
+    return ss.str();
+}
+
+// ============================================================================
+// 静态方法实现
+// ============================================================================
+
+std::string AsrManager::getCurrentDate() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm = std::localtime(&time_t);
+    
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(4) << (tm->tm_year + 1900) << "-"
+       << std::setfill('0') << std::setw(2) << (tm->tm_mon + 1) << "-"
+       << std::setfill('0') << std::setw(2) << tm->tm_mday;
+    
+    return ss.str();
+}
+
+std::string AsrManager::generateSessionId() {
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    
+    std::stringstream ss;
+    ss << "session-" << std::hex << millis << "-" << std::rand();
+    return ss.str();
+}
+
+std::string AsrManager::formatTimePoint(const std::chrono::system_clock::time_point& timePoint) {
+    auto time_t = std::chrono::system_clock::to_time_t(timePoint);
+    std::tm* tm = std::localtime(&time_t);
+    
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(4) << (tm->tm_year + 1900) << "-"
+       << std::setfill('0') << std::setw(2) << (tm->tm_mon + 1) << "-"
+       << std::setfill('0') << std::setw(2) << tm->tm_mday << " "
+       << std::setfill('0') << std::setw(2) << tm->tm_hour << ":"
+       << std::setfill('0') << std::setw(2) << tm->tm_min << ":"
+       << std::setfill('0') << std::setw(2) << tm->tm_sec;
+    
+    return ss.str();
+}
+
+std::string AsrManager::getStatsFilePath() const {
+    std::string dataDir = m_config.statsDataDir;
+    if (dataDir.empty()) {
+        dataDir = std::filesystem::current_path().string() + "/data";
+    }
+    return dataDir + "/asr_usage_stats.json";
+}
+
+std::string AsrManager::getBackupFilePath() const {
+    std::string dataDir = m_config.statsDataDir;
+    if (dataDir.empty()) {
+        dataDir = std::filesystem::current_path().string() + "/data";
+    }
+    return dataDir + "/asr_usage_stats_backup.json";
+}
+
+bool AsrManager::createDataDirectory() const {
+    std::string dataDir = m_config.statsDataDir;
+    if (dataDir.empty()) {
+        dataDir = std::filesystem::current_path().string() + "/data";
+    }
+    
+    try {
+        if (!std::filesystem::exists(dataDir)) {
+            std::filesystem::create_directories(dataDir);
+        }
+        return true;
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 创建数据目录失败: " + std::string(e.what()), true);
+        return false;
+    }
+}
+
+void AsrManager::logStats(const std::string& message) const {
+    logMessage(m_config.logLevel, ASR_LOG_DEBUG, "[统计] " + message);
+}
+
+void AsrManager::logMessage(const std::string& prefix, const std::string& message) {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto timestamp = std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
+    std::cout << "[" << timestamp << "] " << prefix << " " << message << std::endl;
+}
+
+bool AsrManager::loadCredentials() {
+    // 检查环境变量
+    const char* userAppId = std::getenv("ASR_APP_ID");
+    const char* userAccessToken = std::getenv("ASR_ACCESS_TOKEN");
+    const char* userSecretKey = std::getenv("ASR_SECRET_KEY");
+    
+    if (userAppId && userAccessToken) {
+        std::cout << "[ASR-CRED] 使用环境变量中的凭据" << std::endl;
+        creds_.appId = userAppId;
+        creds_.accessToken = userAccessToken;
+        creds_.secretKey = userSecretKey ? userSecretKey : "";
+        creds_.isValid = true;
+        return true;
+    } else {
+        std::cout << "[ASR-CRED] 环境变量未设置，使用体验模式配置" << std::endl;
+        std::cout << "   建议设置环境变量：" << std::endl;
+        std::cout << "   export ASR_APP_ID=your_app_id" << std::endl;
+        std::cout << "   export ASR_ACCESS_TOKEN=your_access_token" << std::endl;
+        std::cout << "   export ASR_SECRET_KEY=your_secret_key" << std::endl;
+        std::cout << "   或者使用 VOLC_ 前缀：" << std::endl;
+        std::cout << "   export VOLC_APP_ID=your_app_id" << std::endl;
+        std::cout << "   export VOLC_ACCESS_TOKEN=your_access_token" << std::endl;
+        std::cout << "   export VOLC_SECRET_KEY=your_secret_key" << std::endl;
+        
+        // 使用混淆的API密钥（体验模式）
+        creds_.appId = SecureKeyManager::getAppId();
+        creds_.accessToken = SecureKeyManager::getAccessToken();
+        creds_.secretKey = SecureKeyManager::getSecretKey();
+        creds_.isValid = true;
+        
+        std::cout << "[ASR-CRED] 体验模式：请确保使用次数未超过限制" << std::endl;
+        return true;
+    }
 }
 
 } // namespace Asr 

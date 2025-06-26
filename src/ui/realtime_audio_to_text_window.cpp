@@ -1,4 +1,6 @@
 #include "ui/realtime_audio_to_text_window.h"
+#include "ui/config_manager.h"
+#include "ui/global_state.h"
 #include "logic/realtime_transcription_controller.h"
 #include <QMessageBox>
 #include <QFileDialog>
@@ -40,7 +42,7 @@ namespace ui {
 class WaveformWidget : public QFrame {
     Q_OBJECT
 public:
-    explicit WaveformWidget(QWidget* parent = nullptr) : QFrame(parent) {
+    explicit WaveformWidget(QWidget* parent = nullptr) : QFrame(parent), gain_(2.0f) {
         setMinimumHeight(100);
         setFrameStyle(QFrame::NoFrame);
         setStyleSheet("background-color: transparent;");
@@ -49,6 +51,11 @@ public:
     void updateWaveform(const QVector<float>& samples) {
         waveformData_ = samples;
         update(); // Request a repaint
+    }
+
+    void setGain(float gain) {
+        gain_ = gain;
+        update();
     }
 
 protected:
@@ -77,13 +84,14 @@ protected:
         // Draw waveform
         for (int i = 0; i < waveformData_.size(); ++i) {
             int x = (int)((float)i / waveformData_.size() * width);
-            int barHeight = (int)(waveformData_[i] * centerY * 0.8);
+            int barHeight = (int)(waveformData_[i] * centerY * 0.8 * gain_);
             painter.drawLine(x, centerY - barHeight, x, centerY + barHeight);
         }
     }
 
 private:
     QVector<float> waveformData_;
+    float gain_;
 };
 
 // =================================================================================
@@ -122,15 +130,15 @@ RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
 }
 
 RealtimeAudioToTextWindow::~RealtimeAudioToTextWindow() {
-    std::cout << "[DEBUG] RealtimeAudioToTextWindow destructor called" << std::endl;
+    std::cout << "[UI] RealtimeAudioToTextWindow destructor called" << std::endl;
     
     if (controller_) {
-        std::cout << "[DEBUG] Calling controller shutdown..." << std::endl;
+        std::cout << "[CTRL] Calling controller shutdown..." << std::endl;
         controller_->shutdown();
-        std::cout << "[DEBUG] Controller shutdown completed" << std::endl;
+        std::cout << "[CTRL] Controller shutdown completed" << std::endl;
     }
     
-    std::cout << "[DEBUG] RealtimeAudioToTextWindow destroyed." << std::endl;
+    std::cout << "[UI] RealtimeAudioToTextWindow destroyed." << std::endl;
 }
 
 void RealtimeAudioToTextWindow::setupUI() {
@@ -181,7 +189,7 @@ void RealtimeAudioToTextWindow::setupUI() {
     // 伪状态栏
     QHBoxLayout* statusLayout = new QHBoxLayout();
     statusLabel_ = new QLabel("Ready", this);
-    statusLabel_->setStyleSheet("QLabel { color: #d0d0d0; }");
+    statusLabel_->setStyleSheet("QLabel { color: #d0d0d0; background: transparent;}");
     statusLayout->addWidget(statusLabel_);
     mainLayout_->addLayout(statusLayout);
 
@@ -195,7 +203,7 @@ void RealtimeAudioToTextWindow::setupStatusBar() {}
 
 void RealtimeAudioToTextWindow::setupBottomControls() {
     QFrame* bottomFrame = new QFrame(this);
-    bottomFrame->setStyleSheet(".QFrame { background-color: #2E2E2E; border-radius: 15px; }");
+    bottomFrame->setStyleSheet("QFrame { background-color: #2E2E2E; border-radius: 15px; }");
     
     QVBoxLayout* bottomLayout = new QVBoxLayout(bottomFrame);
     bottomLayout->setContentsMargins(20, 20, 20, 20);
@@ -239,7 +247,7 @@ void RealtimeAudioToTextWindow::setupBottomControls() {
         "QPushButton {"
         "   border: 2px solid #FF4500;"
         "   border-radius: 35px;"
-        "   background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #555555, stop:1 #333333);"
+        "   background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #555555, stop:1 #333333);"
         "}"
         "QPushButton:checked {"
         "   background-color: #FF4500;"
@@ -301,6 +309,25 @@ void RealtimeAudioToTextWindow::connectSignals() {
 
 void RealtimeAudioToTextWindow::toggleRecording() {
     if (!isRecording_) {
+        // 检查ASR状态
+        if (perfx::ui::asr_valid == 0) {
+            QMessageBox::warning(this, "ASR未就绪", 
+                "ASR配置未验证或验证失败。");
+            return;
+        }
+        
+        // 检查麦克风状态
+        if (perfx::ui::mic_valid == 0) {
+            QMessageBox::warning(this, "麦克风未就绪", 
+                "请先选择有效的音频源。");
+            return;
+        }
+        
+        // 录音前确保ASR线程已启动
+        if (controller_ && !controller_->isAsrThreadRunning()) {
+            controller_->startAsrThread();
+        }
+        
         // Start recording
         if (controller_->startRecording()) {
             isRecording_ = true;
@@ -346,6 +373,8 @@ void RealtimeAudioToTextWindow::stopRecording() {
         controller_->stopRecording();
         // 停止录音时禁用ASR
         controller_->enableRealtimeAsr(false);
+        // 停止录音时关闭ASR线程
+        controller_->stopAsrThread();
     }
     
     isRecording_ = false;
@@ -357,7 +386,7 @@ void RealtimeAudioToTextWindow::stopRecording() {
     // 清空UI和控制器状态
     clearTranscription();
     
-    std::cout << "[Logic] Recording stopped." << std::endl;
+    std::cout << "[AUDIO-THREAD] Recording stopped." << std::endl;
 }
 
 void RealtimeAudioToTextWindow::updateRecordingButtons() {
@@ -430,10 +459,19 @@ void RealtimeAudioToTextWindow::onDeviceSelectionResult(bool success, const QStr
 }
 
 void RealtimeAudioToTextWindow::onAudioSourceChanged(int index) {
-    if (index < 0) return;
+    if (index < 0) {
+        perfx::ui::mic_valid = 0;
+        return;
+    }
+    
     int deviceId = audioSourceComboBox_->itemData(index).toInt();
     if (deviceId >= 0) {
         controller_->selectAudioDevice(deviceId);
+        perfx::ui::mic_valid = 1;
+        qDebug() << "✅ 音源选择成功";
+    } else {
+        perfx::ui::mic_valid = 0;
+        qDebug() << "❌ 音源选择失败";
     }
 }
 
@@ -444,45 +482,30 @@ void RealtimeAudioToTextWindow::updateStatusBar(const QString& message) {
 }
 
 void RealtimeAudioToTextWindow::closeEvent(QCloseEvent *event) {
-    std::cout << "[DEBUG] RealtimeAudioToTextWindow closeEvent called" << std::endl;
+    std::cout << "[UI] RealtimeAudioToTextWindow closeEvent called" << std::endl;
     
-    if (isRecording_) {
-        QMessageBox::StandardButton res = QMessageBox::question(this, "退出确认",
-            "录音正在进行中，您想在退出前停止并保存录音吗？",
-            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
-            QMessageBox::Yes);
-
-        if (res == QMessageBox::Yes) {
-            stopRecording(); // This will trigger the save dialog etc.
-            // 关闭ASR
-            if (controller_) {
-                controller_->enableRealtimeAsr(false);
-                controller_->shutdown();
-            }
-            event->accept();
-        } else if (res == QMessageBox::No) {
-            // User wants to discard the recording.
-            // 关闭ASR
-            if (controller_) {
-                controller_->enableRealtimeAsr(false);
-                controller_->shutdown();
-            }
-            event->accept();
-        } else {
-            // User cancelled the close operation.
-            event->ignore();
-            return;
-        }
-    } else {
-        // 关闭ASR
-        if (controller_) {
-            controller_->enableRealtimeAsr(false);
-            controller_->shutdown();
-        }
-        event->accept(); // Not recording, close normally.
+    // 关闭时停止所有音频任务
+    stopMicCollection();
+    
+    // 关闭ASR线程
+    if (controller_) {
+        controller_->stopAsrThread();
     }
     
-    std::cout << "[DEBUG] RealtimeAudioToTextWindow closeEvent completed" << std::endl;
+    // 确保定时器被停止
+    if (timer_) {
+        timer_->stop();
+        std::cout << "[UI] Recording timer stopped" << std::endl;
+    }
+    
+    // 清理UI状态
+    isRecording_ = false;
+    isPaused_ = false;
+    perfx::ui::mic_valid = 0;
+    
+    event->accept();
+    
+    std::cout << "[UI] RealtimeAudioToTextWindow closeEvent completed" << std::endl;
 }
 
 // ============================================================================
@@ -564,6 +587,7 @@ void RealtimeAudioToTextWindow::onAsrUtterancesUpdated(const QList<QVariantMap>&
 }
 
 void RealtimeAudioToTextWindow::updateAudioDeviceList(const QStringList& names, const QList<int>& ids) {
+    qDebug() << "[AudioDeviceList] names:" << names << "ids:" << ids;
     audioSourceComboBox_->clear();
     for (int i = 0; i < names.size(); ++i) {
         audioSourceComboBox_->addItem(names[i], ids[i]);
@@ -596,7 +620,76 @@ void RealtimeAudioToTextWindow::saveRecording() {
     // This method can be implemented if needed. For now, it's just a placeholder.
 }
 
+void RealtimeAudioToTextWindow::startMicCollection() {
+    // 初始化音频设备
+    if (controller_) {
+        controller_->refreshAudioDevices();
+        perfx::ui::mic_valid = 1;  // 假设初始化成功
+        qDebug() << "🎤 麦克风采集已开启";
+    }
+}
+
+void RealtimeAudioToTextWindow::stopMicCollection() {
+    std::cout << "[AUDIO-THREAD] stopMicCollection() called" << std::endl;
+    
+    // 停止录音和音频采集
+    if (isRecording_) {
+        std::cout << "[AUDIO-THREAD] Stopping active recording..." << std::endl;
+        stopRecording();
+    }
+    
+    // 停止定时器
+    if (timer_) {
+        timer_->stop();
+        std::cout << "[UI] Recording timer stopped" << std::endl;
+    }
+    
+    // 清理控制器
+    if (controller_) {
+        std::cout << "[CTRL] Shutting down controller..." << std::endl;
+        controller_->shutdown();
+        std::cout << "[CTRL] Controller shutdown completed" << std::endl;
+    }
+    
+    // 重置状态
+    isRecording_ = false;
+    isPaused_ = false;
+    perfx::ui::mic_valid = 0;
+    
+    // 清空音频源选择
+    if (audioSourceComboBox_) {
+        audioSourceComboBox_->clear();
+        audioSourceComboBox_->setCurrentIndex(-1);
+    }
+    
+    // 清空波形显示
+    if (auto* waveformWidget = qobject_cast<WaveformWidget*>(waveformFrame_)) {
+        waveformWidget->updateWaveform(QVector<float>());
+    }
+    
+    qDebug() << "🎤 麦克风采集已关闭";
+    std::cout << "[AUDIO-THREAD] stopMicCollection() completed" << std::endl;
+}
+
 void RealtimeAudioToTextWindow::backToMainMenu() {
+    std::cout << "[UI] backToMainMenu() called" << std::endl;
+    
+    // 退出时关闭麦克风采集
+    stopMicCollection();
+    
+    // 关闭ASR线程
+    if (controller_) {
+        controller_->stopAsrThread();
+    }
+    
+    // 清空转写文本
+    clearTranscription();
+    
+    // 重置UI状态
+    updateStatusBar("已返回主菜单");
+    updateRecordingButtons();
+    
+    std::cout << "[UI] backToMainMenu() completed, emitting signal" << std::endl;
     emit backToMainMenuRequested();
 }
 

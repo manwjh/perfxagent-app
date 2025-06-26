@@ -1,0 +1,7 @@
+<RCC>
+  <qresource>
+    <file>icons/audio_file.png</file>
+    <file>icons/realtime_ai_audio.png</file>
+    <file>icons/settging_asr.png</file>
+  </qresource>
+</RCC> 

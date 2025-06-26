@@ -42,8 +42,35 @@ public:
      * 清理资源
      */
     ~Impl() {
-        std::cout << "[DEBUG] ~AudioManager::Impl called" << std::endl;
-        cleanup();
+        std::cout << "[AUDIO-THREAD] Destroying AudioManager..." << std::endl;
+        
+        try {
+            // 停止录音
+            if (recordingInfo_.state != RecordingState::IDLE) {
+                std::cout << "[AUDIO-THREAD] Stopping active recording..." << std::endl;
+                stopStreamRecording();
+            }
+            
+            // 停止音频线程
+            if (audioThread_) {
+                std::cout << "[AUDIO-THREAD] Stopping audio thread..." << std::endl;
+                audioThread_->stop();
+                std::cout << "[AUDIO-THREAD] Audio thread stopped" << std::endl;
+            }
+            
+            // 清理资源
+            if (device_) {
+                std::cout << "[AUDIO-THREAD] Cleaning up audio device..." << std::endl;
+                device_.reset();
+                std::cout << "[AUDIO-THREAD] Audio device cleaned up" << std::endl;
+            }
+            
+            std::cout << "[AUDIO-THREAD] AudioManager destroyed successfully" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Exception in AudioManager destructor: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Unknown exception in AudioManager destructor" << std::endl;
+        }
     }
 
     /**
@@ -51,103 +78,103 @@ public:
      * @return 初始化是否成功
      */
     bool initialize(const AudioConfig& config) {
-        std::cout << "[DEBUG] Entering AudioManager::initialize" << std::endl;
-        config_ = config;
+        std::cout << "[AUDIO-THREAD] Initializing AudioManager..." << std::endl;
+        
+        try {
+            config_ = config;
 
-        // **关键修复：如果已经初始化，先清理之前的资源**
-        if (initialized_) {
-            std::cout << "[DEBUG] AudioManager::initialize: already initialized, cleaning up first..." << std::endl;
-            cleanup();
-        }
+            // **关键修复：如果已经初始化，先清理之前的资源**
+            if (initialized_) {
+                std::cout << "[AUDIO-THREAD] AudioManager::initialize: already initialized, cleaning up first..." << std::endl;
+                cleanup();
+            }
 
-        // 1. 初始化 PortAudio 库
-        PaError err = Pa_Initialize();
-        if (err != paNoError) {
-            std::cerr << "PortAudio initialization failed: " << Pa_GetErrorText(err) << std::endl;
-            return false;
-        }
-
-        // 2. 创建并初始化音频设备
-        device_ = std::make_unique<AudioDevice>();
-        if (!device_->initialize()) {
-            std::cerr << "Failed to initialize audio device" << std::endl;
-            device_.reset();  // 清理设备资源
-            Pa_Terminate();   // 清理 PortAudio
-            return false;
-        }
-
-        // 3. 根据配置决定是否打开输入设备
-        if (config.inputDevice.index >= 0) {
-            std::cout << "[DEBUG] Opening input device with index: " << config.inputDevice.index << std::endl;
-            if (!device_->openInputDevice(config.inputDevice, config)) {
-                std::cerr << "Failed to open input device: " << device_->getLastError() << std::endl;
-                device_.reset();  // 清理设备资源
-                Pa_Terminate();   // 清理 PortAudio
+            // 1. 初始化 PortAudio 库
+            PaError err = Pa_Initialize();
+            if (err != paNoError) {
+                std::cerr << "PortAudio initialization failed: " << Pa_GetErrorText(err) << std::endl;
                 return false;
             }
 
-            // 设置设备回调函数
-            device_->setCallback([this](const void* input, void* output, size_t frameCount) {
-                this->audioCallback(input, output, frameCount);
-            });
-        } else {
-            std::cout << "[DEBUG] No input device specified, operating in file/buffer mode" << std::endl;
-        }
+            // 2. 创建并初始化音频设备
+            device_ = std::make_unique<AudioDevice>();
+            if (!device_->initialize()) {
+                std::cerr << "[AUDIO-THREAD][ERROR] Failed to initialize audio device" << std::endl;
+                throw std::runtime_error("Failed to initialize audio device");
+            }
 
-        // 4. 初始化音频处理器
-        processor_ = std::make_unique<AudioProcessor>();
-        if (!processor_->initialize(config)) {
-            std::cerr << "Failed to initialize audio processor" << std::endl;
-            device_.reset();      // 清理设备资源
-            processor_.reset();   // 清理处理器资源
-            Pa_Terminate();       // 清理 PortAudio
-            return false;
-        }
+            // 3. 根据配置决定是否打开输入设备
+            if (config.inputDevice.index >= 0) {
+                std::cout << "[AUDIO-THREAD] Opening input device with index: " << config.inputDevice.index << std::endl;
+                if (!device_->openInputDevice(config.inputDevice, config)) {
+                    std::cerr << "Failed to open input device: " << device_->getLastError() << std::endl;
+                    device_.reset();  // 清理设备资源
+                    Pa_Terminate();   // 清理 PortAudio
+                    return false;
+                }
 
-        // 5. 配置编码格式和参数
-        processor_->setEncodingFormat(config.encodingFormat);
-        if (config.encodingFormat == EncodingFormat::OPUS) {
-            // 计算 Opus 帧大小（采样点数）
-            int samplesPerFrame = (config.opusFrameLength * static_cast<int>(config.sampleRate)) / 1000;
-            std::cout << "[DEBUG] Opus frame size: " << samplesPerFrame << " samples" << std::endl;
-            std::cout << "- opusFrameLength:" << config.opusFrameLength << std::endl;
-            std::cout << "- sampleRate:" << static_cast<int>(config.sampleRate) << std::endl;
-            
-            // 检查缓冲区大小是否是帧大小的整数倍
-            if (samplesPerFrame % config.framesPerBuffer != 0) {
-                std::cerr << "Warning: Opus frame size (" << samplesPerFrame 
-                         << ") is not a multiple of buffer size (" << config.framesPerBuffer << ")" << std::endl;
+                // 设置设备回调函数
+                device_->setCallback([this](const void* input, void* output, size_t frameCount) {
+                    this->audioCallback(input, output, frameCount);
+                });
             } else {
-                std::cout << "[DEBUG] Buffer size (" << config.framesPerBuffer 
-                         << ") is compatible with Opus frame size (" << samplesPerFrame << ")" << std::endl;
+                std::cout << "[AUDIO-THREAD] No input device specified, operating in file/buffer mode" << std::endl;
             }
-            
-            processor_->setOpusFrameLength(config.opusFrameLength);
-        }
 
-        // 6. 初始化音频线程（仅在设备模式下需要）
-        if (config.inputDevice.index >= 0) {
-            audioStreamThread_ = std::make_shared<AudioThread>();
-            if (!audioStreamThread_->initialize(processor_.get())) {
-                std::cerr << "Failed to initialize audio thread" << std::endl;
-                device_.reset();          // 清理设备资源
-                processor_.reset();       // 清理处理器资源
-                audioStreamThread_.reset(); // 清理线程资源
-                Pa_Terminate();           // 清理 PortAudio
+            // 4. 初始化音频处理器
+            processor_ = std::make_unique<AudioProcessor>();
+            if (!processor_->initialize(config)) {
+                std::cerr << "Failed to initialize audio processor" << std::endl;
+                device_.reset();      // 清理设备资源
+                processor_.reset();   // 清理处理器资源
+                Pa_Terminate();       // 清理 PortAudio
                 return false;
             }
-        }
 
-        // 7. 标记初始化完成
-        initialized_ = true;
-        std::cout << "[DEBUG] Exiting AudioManager::initialize, result: success" << std::endl;
+            // 5. 配置编码格式和参数
+            processor_->setEncodingFormat(config.encodingFormat);
+            if (config.encodingFormat == EncodingFormat::OPUS) {
+                // 计算 Opus 帧大小（采样点数）
+                int samplesPerFrame = (config.opusFrameLength * static_cast<int>(config.sampleRate)) / 1000;
+                std::cout << "[AUDIO-THREAD] Opus frame size: " << samplesPerFrame << " samples" << std::endl;
+                std::cout << "- opusFrameLength:" << config.opusFrameLength << std::endl;
+                std::cout << "- sampleRate:" << static_cast<int>(config.sampleRate) << std::endl;
+                
+                // 检查缓冲区大小是否是帧大小的整数倍
+                if (samplesPerFrame % config.framesPerBuffer != 0) {
+                    std::cerr << "Warning: Opus frame size (" << samplesPerFrame 
+                             << ") is not a multiple of buffer size (" << config.framesPerBuffer << ")" << std::endl;
+                } else {
+                    std::cout << "[AUDIO-THREAD] Buffer size (" << config.framesPerBuffer 
+                             << ") is compatible with Opus frame size (" << samplesPerFrame << ")" << std::endl;
+                }
+                
+                processor_->setOpusFrameLength(config.opusFrameLength);
+            }
 
-        if (device_) {
-            device_->setErrorCallback([this](const std::string& errorMsg) {
-                if (onError_) onError_(errorMsg);
-            });
+            // 6. 初始化音频线程（仅在设备模式下需要）
+            if (config.inputDevice.index >= 0) {
+                audioThread_ = std::make_unique<AudioThread>();
+                if (!audioThread_->initialize(processor_.get())) {
+                    std::cerr << "[AUDIO-THREAD][ERROR] Failed to initialize audio thread" << std::endl;
+                    throw std::runtime_error("Failed to initialize audio thread");
+                }
+            }
+
+            // 7. 标记初始化完成
+            initialized_ = true;
+            std::cout << "[AUDIO-THREAD] AudioManager initialization completed successfully" << std::endl;
+
+            if (device_) {
+                device_->setErrorCallback([this](const std::string& errorMsg) {
+                    if (onError_) onError_(errorMsg);
+                });
+            }
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "[AUDIO-THREAD][ERROR] Exception in AudioManager::initialize: " << e.what() << std::endl;
+            return false;
         }
-        return true;
     }
 
     // ============================================================================
@@ -171,8 +198,8 @@ public:
         if (!outputFile.empty()) {
             if (!initializeWavFile(outputFile)) {
                 // 如果初始化WAV文件失败，停止音频流
-                if (audioStreamThread_) {
-                    audioStreamThread_->stop();
+                if (audioThread_) {
+                    audioThread_->stop();
                 }
                 return false;
             }
@@ -188,7 +215,7 @@ public:
         recordingInfo_.recordedFrames = 0;
         recordingInfo_.totalPausedTime = 0.0;
         
-        std::cout << "[DEBUG] Stream recording started: " << (outputFile.empty() ? "waveform only" : outputFile) << std::endl;
+        std::cout << "[AUDIO-THREAD] Stream recording started: " << (outputFile.empty() ? "waveform only" : outputFile) << std::endl;
         return true;
     }
     
@@ -213,7 +240,7 @@ public:
         recordingInfo_.recordedFrames = 0;
         recordingInfo_.totalPausedTime = 0.0;
         
-        std::cout << "[DEBUG] Audio stream started for waveform display only" << std::endl;
+        std::cout << "[AUDIO-THREAD] Audio stream started for waveform display only" << std::endl;
         return true;
     }
     
@@ -228,7 +255,7 @@ public:
         recordingInfo_.state = RecordingState::PAUSED;
         recordingInfo_.pauseTime = std::chrono::steady_clock::now();
         
-        std::cout << "[DEBUG] Stream recording paused (audio stream kept running)" << std::endl;
+        std::cout << "[AUDIO-THREAD] Stream recording paused (audio stream kept running)" << std::endl;
         return true;
     }
     
@@ -246,7 +273,7 @@ public:
         
         recordingInfo_.state = RecordingState::RECORDING;
         
-        std::cout << "[DEBUG] Stream recording resumed" << std::endl;
+        std::cout << "[AUDIO-THREAD] Stream recording resumed" << std::endl;
         return true;
     }
     
@@ -263,12 +290,12 @@ public:
         // 如果有输出文件，完成WAV文件
         if (!recordingInfo_.outputFile.empty()) {
             finalizeWavFile();
-            std::cout << "[DEBUG] Recording completed: " << recordingInfo_.outputFile << std::endl;
+            std::cout << "[AUDIO-THREAD] Recording completed: " << recordingInfo_.outputFile << std::endl;
         }
         
         // 停止音频流
-        if (audioStreamThread_) {
-            audioStreamThread_->stop();
+        if (audioThread_) {
+            audioThread_->stop();
         }
         
         // 重置录音信息
@@ -278,7 +305,7 @@ public:
         recordingInfo_.recordedFrames = 0;
         recordingInfo_.totalPausedTime = 0.0;
         
-        std::cout << "[DEBUG] Recording stopped" << std::endl;
+        std::cout << "[AUDIO-THREAD] Recording stopped" << std::endl;
         return true;
     }
     
@@ -392,68 +419,79 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         
         if (!initialized_) {
-            std::cout << "[DEBUG] AudioManager::cleanup: already cleaned up, skipping" << std::endl;
+            std::cout << "[AUDIO-THREAD] AudioManager::cleanup: already cleaned up, skipping" << std::endl;
             return;
         }
         
-        std::cout << "[DEBUG] AudioManager::cleanup: starting cleanup..." << std::endl;
+        std::cout << "[AUDIO-THREAD] AudioManager::cleanup: starting cleanup..." << std::endl;
         
         // 1. 停止音频流
         if (device_ && device_->isStreamActive()) {
-            std::cout << "[DEBUG] Stopping active audio stream..." << std::endl;
+            std::cout << "[AUDIO-THREAD] Stopping active audio stream..." << std::endl;
             device_->stopStream();
-            std::cout << "[DEBUG] Audio stream stopped" << std::endl;
+            std::cout << "[AUDIO-THREAD] Audio stream stopped" << std::endl;
         }
         
-        // 2. 停止音频线程
-        if (audioStreamThread_) {
-            std::cout << "[DEBUG] Stopping audio thread..." << std::endl;
-            audioStreamThread_->stop();
+        // 2. 停止音频线程 - 改进停止逻辑
+        if (audioThread_) {
+            std::cout << "[AUDIO-THREAD] Stopping audio thread..." << std::endl;
+            
+            // 先停止线程
+            audioThread_->stop();
             
             // 等待线程结束，添加超时机制
             auto startTime = std::chrono::steady_clock::now();
-            const auto timeout = std::chrono::seconds(3); // 3秒超时
+            const auto timeout = std::chrono::seconds(5); // 增加到5秒超时
             
-            while (audioStreamThread_->isRunning()) {
+            while (audioThread_->isRunning()) {
                 auto now = std::chrono::steady_clock::now();
                 if (now - startTime > timeout) {
-                    std::cout << "[DEBUG] Audio thread stop timeout, forcing cleanup" << std::endl;
+                    std::cout << "[WARNING] Audio thread stop timeout after 5 seconds, forcing cleanup" << std::endl;
                     break;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50)); // 减少等待间隔
             }
             
-            audioStreamThread_.reset();
-            std::cout << "[DEBUG] Audio thread cleaned up" << std::endl;
+            // 强制重置线程
+            audioThread_.reset();
+            std::cout << "[AUDIO-THREAD] Audio thread cleaned up" << std::endl;
         }
         
         // 3. 关闭音频设备
         if (device_) {
-            std::cout << "[DEBUG] Closing audio device..." << std::endl;
+            std::cout << "[AUDIO-THREAD] Closing audio device..." << std::endl;
             device_->closeDevice();
             device_.reset();
-            std::cout << "[DEBUG] Audio device closed" << std::endl;
+            std::cout << "[AUDIO-THREAD] Audio device closed" << std::endl;
         }
         
         // 4. 释放处理器
         if (processor_) {
-            std::cout << "[DEBUG] Cleaning up audio processor..." << std::endl;
+            std::cout << "[AUDIO-THREAD] Cleaning up audio processor..." << std::endl;
             processor_.reset();
-            std::cout << "[DEBUG] Audio processor cleaned up" << std::endl;
+            std::cout << "[AUDIO-THREAD] Audio processor cleaned up" << std::endl;
         }
         
-        // 5. 终止 PortAudio
-        std::cout << "[DEBUG] Terminating PortAudio..." << std::endl;
+        // 5. 清理波形数据
+        latestWaveformData_.clear();
+        std::cout << "[AUDIO-THREAD] Waveform data cleared" << std::endl;
+        
+        // 6. 清理外部回调
+        externalAudioCallback_ = nullptr;
+        std::cout << "[AUDIO-THREAD] External audio callback cleared" << std::endl;
+        
+        // 7. 终止 PortAudio
+        std::cout << "[AUDIO-THREAD] Terminating PortAudio..." << std::endl;
         PaError err = Pa_Terminate();
         if (err != paNoError) {
             std::cerr << "PortAudio termination failed: " << Pa_GetErrorText(err) << std::endl;
         } else {
-            std::cout << "[DEBUG] PortAudio terminated successfully" << std::endl;
+            std::cout << "[AUDIO-THREAD] PortAudio terminated successfully" << std::endl;
         }
         
-        // 6. 重置状态
+        // 8. 重置状态
         initialized_ = false;
-        std::cout << "[DEBUG] AudioManager::cleanup: cleanup completed" << std::endl;
+        std::cout << "[AUDIO-THREAD] AudioManager::cleanup: cleanup completed" << std::endl;
     }
 
     bool writeWavFile(const void* input, size_t frames, const std::string& filename) {
@@ -501,8 +539,8 @@ public:
         if (!initializeWavFile(outputFile)) {
             // 如果文件初始化失败，并且我们刚启动了流，那么需要停止它
             if (recordingInfo_.state == RecordingState::IDLE) {
-                if (audioStreamThread_) {
-                    audioStreamThread_->stop();
+                if (audioThread_) {
+                    audioThread_->stop();
                 }
             }
             return false;
@@ -517,7 +555,7 @@ public:
         recordingInfo_.recordedFrames = 0;
         recordingInfo_.totalPausedTime = 0.0;
         
-        std::cout << "[DEBUG] Recording started and saving to: " << outputFile << std::endl;
+        std::cout << "[AUDIO-THREAD] Recording started and saving to: " << outputFile << std::endl;
         return true;
     }
 
@@ -534,12 +572,12 @@ public:
         // 如果有输出文件，完成WAV文件
         if (!recordingInfo_.outputFile.empty()) {
             finalizeWavFile();
-            std::cout << "[DEBUG] Recording completed: " << recordingInfo_.outputFile << std::endl;
+            std::cout << "[AUDIO-THREAD] Recording completed: " << recordingInfo_.outputFile << std::endl;
         }
         
         // 停止音频流
-        if (audioStreamThread_) {
-            audioStreamThread_->stop();
+        if (audioThread_) {
+            audioThread_->stop();
         }
         
         // 重置录音信息
@@ -549,7 +587,7 @@ public:
         recordingInfo_.recordedFrames = 0;
         recordingInfo_.totalPausedTime = 0.0;
         
-        std::cout << "[DEBUG] Recording stopped" << std::endl;
+        std::cout << "[AUDIO-THREAD] Recording stopped" << std::endl;
         return true;
     }
 
@@ -616,7 +654,7 @@ public:
             return false;
         }
         recordingInfo_.outputFile = outputFile;
-        std::cout << "[DEBUG] Started writing to file: " << outputFile << std::endl;
+        std::cout << "[AUDIO-THREAD] Started writing to file: " << outputFile << std::endl;
         return true;
     }
     
@@ -631,7 +669,7 @@ public:
         std::string completedFile = recordingInfo_.outputFile;
         recordingInfo_.outputFile.clear();
 
-        std::cout << "[DEBUG] Stopped writing to file: " << completedFile << std::endl;
+        std::cout << "[AUDIO-THREAD] Stopped writing to file: " << completedFile << std::endl;
         return true;
     }
 
@@ -768,6 +806,22 @@ private:
         if (latestWaveformData_.size() > 1000) {
             latestWaveformData_ = latestWaveformData_.mid(latestWaveformData_.size() - 1000);
         }
+        
+        // 添加调试信息，但限制频率
+        static int updateCount = 0;
+        static std::chrono::steady_clock::time_point lastUpdateLog = std::chrono::steady_clock::now();
+        updateCount++;
+        
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdateLog).count();
+        
+        if (elapsed >= 3000) { // 每3秒输出一次调试信息
+            std::cout << "[AUDIO-THREAD] Waveform data updated - updates: " << updateCount 
+                      << ", frameCount: " << frameCount 
+                      << ", waveform size: " << latestWaveformData_.size() << std::endl;
+            updateCount = 0;
+            lastUpdateLog = now;
+        }
     }
     
     bool startAudioStream() {
@@ -797,6 +851,22 @@ private:
             return;
         }
 
+        // 添加调试信息，但限制频率避免日志过多
+        static int callbackCount = 0;
+        static std::chrono::steady_clock::time_point lastLogTime = std::chrono::steady_clock::now();
+        callbackCount++;
+        
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastLogTime).count();
+        
+        if (elapsed >= 5000) { // 每5秒输出一次调试信息
+            std::cout << "[AUDIO-THREAD] Audio callback active - callbacks: " << callbackCount 
+                      << ", frameCount: " << frameCount 
+                      << ", input: " << (input ? "valid" : "null") << std::endl;
+            callbackCount = 0;
+            lastLogTime = now;
+        }
+
         // 1. 波形数据处理（现有逻辑）
         if (input && frameCount > 0) {
             updateWaveformData(input, frameCount);
@@ -824,7 +894,7 @@ private:
 
     bool initialized_;
     std::shared_ptr<AudioProcessor> processor_;
-    std::shared_ptr<AudioThread> audioStreamThread_;
+    std::unique_ptr<AudioThread> audioThread_;
     std::string currentOutputFile_;
     std::vector<int16_t> recordingBuffer_;
     std::unique_ptr<AudioDevice> device_;

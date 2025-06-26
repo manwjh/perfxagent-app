@@ -472,6 +472,9 @@ public:
      */
     AudioFileInfo parseAudioFile(const std::string& filePath);
 
+    // 新增：测试握手/鉴权
+    bool testHandshake();
+
 private:
     // ============================================================================
     // 私有方法

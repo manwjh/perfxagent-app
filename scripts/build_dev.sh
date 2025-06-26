@@ -55,6 +55,8 @@ check_dependencies() {
 clean_build() {
     log_info "Cleaning build directory..."
     rm -rf build
+    # 确保删除所有可能的构建残留
+    rm -rf build/third_party build/src
     mkdir -p build
     log_success "Build directory cleaned"
 }
@@ -64,9 +66,9 @@ build_project() {
     log_info "Building project in Debug mode..."
     cd build
     
-    # 配置项目 - 强制使用Debug模式
+    # 配置项目 - 强制使用Debug模式，使用--fresh选项避免缓存问题
     log_info "Configuring project with CMake (Debug mode)..."
-    cmake .. -DCMAKE_BUILD_TYPE=Debug
+    cmake .. -DCMAKE_BUILD_TYPE=Debug --fresh
     
     # 编译项目
     log_info "Compiling project..."

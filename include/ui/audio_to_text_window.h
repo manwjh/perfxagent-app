@@ -102,6 +102,7 @@ private:
     void updatePlaybackControls();
     QString formatTime(qint64 milliseconds);
     void startNextAsrTask();
+    void resetState();
     
     // 窗口事件处理
     void closeEvent(QCloseEvent *event) override;

@@ -14,6 +14,7 @@ A Qt6-based cross-platform desktop application focused on audio processing, real
 - 🖥️ **现代化UI**: 基于Qt6的图形用户界面，支持多窗口管理
 - ⚡ **高性能**: 异步处理，支持流式音频处理
 - 🎨 **资源管理**: 完整的图标和UI资源管理系统
+- 🔐 **安全配置**: 多种API密钥配置方式，支持混淆保护
 
 - 🎤 **Audio Processing**: High-quality audio recording, playback, and format conversion
 - 🗣️ **Real-time Speech Recognition**: Integrated Volcengine ASR service with real-time speech-to-text
@@ -23,6 +24,7 @@ A Qt6-based cross-platform desktop application focused on audio processing, real
 - 🖥️ **Modern UI**: Qt6-based graphical user interface with multi-window management
 - ⚡ **High Performance**: Asynchronous processing with streaming audio support
 - 🎨 **Resource Management**: Complete icon and UI resource management system
+- 🔐 **Secure Configuration**: Multiple API key configuration methods with obfuscation protection
 
 ## 🛠️ 系统要求 / System Requirements
 
@@ -296,6 +298,53 @@ perfxagent-app/
 - **Real-time Text**: Supports intermediate and final results
 
 ## 🔧 配置说明 / Configuration
+
+### API密钥配置 / API Key Configuration
+
+#### 配置方式优先级 / Configuration Priority
+
+1. **环境变量**（最高优先级 / Highest Priority）
+   ```bash
+   export ASR_APP_ID="your_app_id"
+   export ASR_ACCESS_TOKEN="your_access_token"
+   export ASR_SECRET_KEY="your_secret_key"
+   ```
+
+2. **配置文件**（推荐 / Recommended）
+   ```bash
+   # 复制模板文件
+   cp config/api_keys_template.json config/api_keys.json
+   
+   # 编辑配置文件，填入真实密钥
+   # Edit the config file with your real API keys
+   ```
+
+3. **UI界面配置**（通过应用程序设置 / Via Application Settings）
+   - 在应用程序的系统配置界面中设置
+   - 配置保存在 `~/.perfxagent/asr_config.json`
+
+4. **混淆代码**（体验模式 / Trial Mode）
+   - 使用内置的混淆API密钥
+   - 仅用于测试和体验
+
+#### 生成混淆数据 / Generate Obfuscated Data
+
+```bash
+# 运行混淆工具（支持多种输入方式）
+python3 scripts/generate_obfuscated_keys.py
+
+# 工具会自动检测：
+# - config/api_keys.json 配置文件
+# - ASR_* 环境变量
+# - 交互式输入
+```
+
+#### 安全注意事项 / Security Notes
+
+- ✅ `config/api_keys_template.json` - 可以提交到Git（模板文件）
+- ❌ `config/api_keys.json` - 不要提交到Git（包含真实密钥）
+- ✅ 使用环境变量作为替代方案
+- ✅ 使用UI界面配置作为替代方案
 
 ### ASR配置 / ASR Configuration
 

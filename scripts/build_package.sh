@@ -120,21 +120,19 @@ create_app_icon() {
     log_info "Creating application icon..."
     
     # 检查是否有新生成的图标文件
-    if [ -f "resources/icons/app_icon.icns" ]; then
-        log_success "Using existing application icon: resources/icons/app_icon.icns"
-        # 复制到cmake目录（如果需要的话）
-        cp resources/icons/app_icon.icns cmake/app_icon.icns
+    if [ -f "resources/packaging/macos/app_icon.icns" ]; then
+        log_success "Using existing application icon: resources/packaging/macos/app_icon.icns"
     elif [ -f "resources/icons/PerfxAgent-ASR.png" ]; then
         log_info "Generating application icon from source..."
         # 运行图标生成脚本
         ./scripts/icon_generator.sh
-        # 复制到cmake目录
-        cp resources/icons/app_icon.icns cmake/app_icon.icns
+        # 复制到新位置
+        cp resources/icons/app_icon.icns resources/packaging/macos/app_icon.icns
         log_success "Application icon created"
     else
         log_warning "No icon source file found. Using default icon."
         # 创建一个简单的默认图标
-        touch cmake/app_icon.icns
+        touch resources/packaging/macos/app_icon.icns
     fi
 }
 
@@ -144,12 +142,12 @@ create_dmg_background() {
     
     # 检查是否有背景图片源文件
     if [ -f "resources/dmg_background.png" ]; then
-        cp resources/dmg_background.png cmake/dmg_background.png
+        cp resources/dmg_background.png resources/packaging/macos/dmg_background.png
         log_success "DMG background image created"
     else
         log_warning "No DMG background image found. Using default."
         # 创建一个简单的默认背景
-        touch cmake/dmg_background.png
+        touch resources/packaging/macos/dmg_background.png
     fi
 }
 
@@ -162,7 +160,7 @@ deploy_dependencies() {
         exit 1
     fi
     
-    ./cmake/deploy_dependencies.sh build/bin/PerfxAgent-ASR.app
+    ./scripts/platforms/macos/deploy_dependencies.sh build/bin/PerfxAgent-ASR.app
     log_success "Dependencies deployed"
 }
 

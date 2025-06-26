@@ -9,9 +9,10 @@
 // - 多种客户端实现的管理
 // - 运行时客户端选择
 // - 配置管理和凭据管理
+// - 连接时间统计和持久化
 // 
 // 作者: PerfXAgent Team
-// 版本: 1.5.0
+// 版本: 1.6.0
 // 日期: 2024
 // 参考: 火山引擎 ASR WebSocket 协议文档
 //
@@ -26,6 +27,10 @@
 #include <chrono>
 #include <map>
 #include <mutex>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <filesystem>
 #include "asr/asr_client.h"
 #include "asr/asr_debug_config.h"
 
@@ -56,6 +61,118 @@ enum class AsrStatus {
 };
 
 // ============================================================================
+// 计时器相关结构体定义
+// ============================================================================
+
+/**
+ * @brief 单次连接会话统计
+ */
+struct ConnectionSession {
+    std::chrono::system_clock::time_point connectTime;    // 连接开始时间
+    std::chrono::system_clock::time_point disconnectTime; // 连接结束时间
+    std::chrono::milliseconds duration;                   // 连接持续时间
+    std::string sessionId;                                // 会话ID
+    bool isCompleted;                                     // 是否正常完成
+    
+    ConnectionSession() : duration(0), isCompleted(false) {}
+    
+    // 计算持续时间
+    void calculateDuration() {
+        if (connectTime.time_since_epoch().count() > 0 && 
+            disconnectTime.time_since_epoch().count() > 0) {
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                disconnectTime - connectTime);
+        }
+    }
+    
+    // 获取格式化的持续时间字符串
+    std::string getFormattedDuration() const {
+        auto totalSeconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+        auto hours = totalSeconds / 3600;
+        auto minutes = (totalSeconds % 3600) / 60;
+        auto seconds = totalSeconds % 60;
+        
+        std::stringstream ss;
+        if (hours > 0) {
+            ss << hours << "h " << minutes << "m " << seconds << "s";
+        } else if (minutes > 0) {
+            ss << minutes << "m " << seconds << "s";
+        } else {
+            ss << seconds << "s";
+        }
+        return ss.str();
+    }
+};
+
+/**
+ * @brief 每日使用统计
+ */
+struct DailyUsageStats {
+    std::string date;                                     // 日期 (YYYY-MM-DD)
+    std::chrono::milliseconds totalDuration;              // 当日总使用时长
+    int sessionCount;                                     // 会话次数
+    std::vector<ConnectionSession> sessions;              // 当日所有会话
+    
+    DailyUsageStats() : totalDuration(0), sessionCount(0) {}
+    
+    // 添加会话
+    void addSession(const ConnectionSession& session) {
+        sessions.push_back(session);
+        totalDuration += session.duration;
+        sessionCount++;
+    }
+    
+    // 获取格式化的总时长字符串
+    std::string getFormattedTotalDuration() const {
+        auto totalSeconds = std::chrono::duration_cast<std::chrono::seconds>(totalDuration).count();
+        auto hours = totalSeconds / 3600;
+        auto minutes = (totalSeconds % 3600) / 60;
+        auto seconds = totalSeconds % 60;
+        
+        std::stringstream ss;
+        if (hours > 0) {
+            ss << hours << "h " << minutes << "m " << seconds << "s";
+        } else if (minutes > 0) {
+            ss << minutes << "m " << seconds << "s";
+        } else {
+            ss << seconds << "s";
+        }
+        return ss.str();
+    }
+};
+
+/**
+ * @brief 总体统计信息
+ */
+struct OverallStats {
+    std::chrono::milliseconds totalDuration;              // 总使用时长
+    int totalSessionCount;                                 // 总会话次数
+    std::chrono::system_clock::time_point firstUsage;     // 首次使用时间
+    std::chrono::system_clock::time_point lastUsage;      // 最后使用时间
+    int activeDays;                                        // 活跃天数
+    
+    OverallStats() : totalDuration(0), totalSessionCount(0), activeDays(0) {}
+    
+    // 获取格式化的总时长字符串
+    std::string getFormattedTotalDuration() const {
+        auto totalSeconds = std::chrono::duration_cast<std::chrono::seconds>(totalDuration).count();
+        auto hours = totalSeconds / 3600;
+        auto minutes = (totalSeconds % 3600) / 60;
+        auto seconds = totalSeconds % 60;
+        
+        std::stringstream ss;
+        if (hours > 0) {
+            ss << hours << "h " << minutes << "m " << seconds << "s";
+        } else if (minutes > 0) {
+            ss << minutes << "m " << seconds << "s";
+        } else {
+            ss << seconds << "s";
+        }
+        return ss.str();
+    }
+};
+
+// ============================================================================
 // 结构体定义
 // ============================================================================
 
@@ -77,6 +194,7 @@ struct AsrConfig {
     std::string accessToken;
     std::string secretKey;
     bool isValid = false;  // 配置是否有效
+    std::string configSource;  // 配置来源："environment_variables", "trial_mode", "user_config"
     
     // ============================================================================
     // 音频配置
@@ -114,6 +232,12 @@ struct AsrConfig {
     bool enableDataLog = ASR_ENABLE_DATA_LOG;
     bool enableProtocolLog = ASR_ENABLE_PROTOCOL_LOG;
     bool enableAudioLog = ASR_ENABLE_AUDIO_LOG;
+    
+    // ============================================================================
+    // 计时器配置
+    // ============================================================================
+    bool enableUsageTracking = true;                       // 是否启用使用统计
+    std::string statsDataDir = "";                         // 统计数据存储目录
 };
 
 /**
@@ -154,6 +278,7 @@ struct AudioFileInfo {
  * 
  * 提供统一的 ASR 接口，管理多种 ASR 客户端实现
  * 支持配置管理、连接控制、音频识别等功能
+ * 新增：连接时间统计和持久化功能
  */
 class AsrManager : public AsrCallback {
 public:
@@ -192,6 +317,7 @@ public:
     bool sendAudioFile(const std::string& filePath);
     bool recognizeAudioFile(const std::string& filePath, bool waitForFinal = true, int timeoutMs = 30000);
     bool startRecognition();
+    void stopRecognition();
 
     // ============================================================================
     // 实时流识别 (新增)
@@ -233,7 +359,78 @@ public:
     // 音频识别方法（异步）
     // ============================================================================
     void recognizeAudioFileAsync(const std::string& filePath);
-    void stopRecognition();
+
+    // ============================================================================
+    // 计时器统计功能 (新增)
+    // ============================================================================
+    
+    /**
+     * @brief 获取今日使用统计
+     * @return 今日统计信息
+     */
+    DailyUsageStats getTodayStats() const;
+    
+    /**
+     * @brief 获取指定日期使用统计
+     * @param date 日期字符串 (YYYY-MM-DD)
+     * @return 指定日期统计信息
+     */
+    DailyUsageStats getDateStats(const std::string& date) const;
+    
+    /**
+     * @brief 获取总体统计信息
+     * @return 总体统计信息
+     */
+    OverallStats getOverallStats() const;
+    
+    /**
+     * @brief 获取最近N天的统计信息
+     * @param days 天数
+     * @return 最近N天的统计信息列表
+     */
+    std::vector<DailyUsageStats> getRecentStats(int days) const;
+    
+    /**
+     * @brief 获取所有历史统计信息
+     * @return 所有历史统计信息
+     */
+    std::map<std::string, DailyUsageStats> getAllStats() const;
+    
+    /**
+     * @brief 获取当前会话统计信息
+     * @return 当前会话信息
+     */
+    ConnectionSession getCurrentSession() const;
+    
+    /**
+     * @brief 保存统计数据到文件
+     * @return 是否保存成功
+     */
+    bool saveStats();
+    
+    /**
+     * @brief 从文件加载统计数据
+     * @return 是否加载成功
+     */
+    bool loadStats();
+    
+    /**
+     * @brief 清除所有统计数据
+     */
+    void clearStats();
+    
+    /**
+     * @brief 导出统计数据为CSV格式
+     * @param filePath 导出文件路径
+     * @return 是否导出成功
+     */
+    bool exportToCsv(const std::string& filePath) const;
+    
+    /**
+     * @brief 获取统计信息摘要字符串
+     * @return 格式化的统计信息摘要
+     */
+    std::string getStatsSummary() const;
     
     // ============================================================================
     // 静态方法
@@ -241,6 +438,11 @@ public:
     static bool loadConfigFromEnv(AsrConfig& config);
     static std::string getClientTypeName(ClientType type);
     static std::string getStatusName(AsrStatus status);
+    
+    // 计时器相关静态方法
+    static std::string getCurrentDate();
+    static std::string generateSessionId();
+    static std::string formatTimePoint(const std::chrono::system_clock::time_point& timePoint);
 
     // ============================================================================
     // AsrCallback 接口实现
@@ -249,6 +451,14 @@ public:
     void onMessage(AsrClient* client, const std::string& message) override;
     void onError(AsrClient* client, const std::string& error) override;
     void onClose(AsrClient* client) override;
+
+    // 新增：测试ASR连接
+    bool testConnection(const std::string& appId, const std::string& accessToken, const std::string& secretKey);
+
+    // 新增：ASR线程状态判断和启动/关闭接口
+    bool isAsrThreadRunning() const;
+    void startAsrThread();
+    void stopAsrThread();
 
 private:
     // ============================================================================
@@ -261,6 +471,15 @@ private:
     AudioFileInfo parseMp3File(const std::string& filePath, const std::vector<uint8_t>& header);
     AudioFileInfo parsePcmFile(const std::string& filePath, const std::vector<uint8_t>& header);
     void recognition_thread_func(const std::string& filePath);
+    
+    // 计时器相关私有方法
+    void startSessionTimer();
+    void endSessionTimer(bool isCompleted = true);
+    void updateOverallStats();
+    std::string getStatsFilePath() const;
+    std::string getBackupFilePath() const;
+    bool createDataDirectory() const;
+    void logStats(const std::string& message) const;
 
     // ============================================================================
     // 私有成员变量
@@ -287,6 +506,19 @@ private:
     size_t accumulatedFrames_ = 0;
     size_t targetPacketFrames_ = 0;  // 100ms对应的帧数
     mutable std::mutex realtimeMutex_;
+    
+    // ============================================================================
+    // 计时器相关成员变量 (新增)
+    // ============================================================================
+    std::map<std::string, DailyUsageStats> m_dailyStats_;     // 每日统计信息
+    ConnectionSession m_currentSession_;                       // 当前会话
+    OverallStats m_overallStats_;                             // 总体统计信息
+    std::atomic<int> m_sessionCounter_{0};                    // 会话计数器
+    mutable std::mutex m_statsMutex_;                         // 统计信息互斥锁
+    
+    // 文件路径
+    std::string m_statsFilePath_;                             // 统计文件路径
+    std::string m_backupFilePath_;                            // 备份文件路径
 };
 
 } // namespace Asr 

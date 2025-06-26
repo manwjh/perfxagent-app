@@ -30,6 +30,10 @@ public:
     explicit RealtimeAudioToTextWindow(QWidget *parent = nullptr);
     ~RealtimeAudioToTextWindow();
 
+    // 麦克风管理方法
+    void startMicCollection();
+    void stopMicCollection();
+
     signals:
     void backToMainMenuRequested();
 

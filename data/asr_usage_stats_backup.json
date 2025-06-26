@@ -1,0 +1,27 @@
+{
+  "daily_stats": [
+    {
+      "date": "2025-06-26",
+      "session_count": 1,
+      "sessions": [
+        {
+          "connect_time": "2025-06-26 23:08:48",
+          "disconnect_time": "2025-06-26 23:10:15",
+          "duration_ms": 87081,
+          "is_completed": true,
+          "session_id": "session-197acc8c422-60b7acd9"
+        }
+      ],
+      "total_duration_ms": 87081
+    }
+  ],
+  "last_updated": "2025-06-26",
+  "overall_stats": {
+    "active_days": 1,
+    "first_usage": "2025-06-26 23:08:48",
+    "last_usage": "2025-06-26 23:10:15",
+    "total_duration_ms": 87081,
+    "total_session_count": 1
+  },
+  "version": "1.0"
+}
