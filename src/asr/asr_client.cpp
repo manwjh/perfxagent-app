@@ -159,52 +159,58 @@ void AsrClient::setSegDuration(int duration) {
 // ============================================================================
 
 bool AsrClient::connect() {
-    std::cout << "[ASR-CRED] Attempting to connect to ASR service..." << std::endl;
-    
     try {
-        // 检查是否已经连接
-        if (m_webSocket.getReadyState() == ix::ReadyState::Open) {
-            std::cout << "[ASR-CRED] Already connected to ASR service" << std::endl;
+        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            return false; // 避免死锁
+        }
+        
+        if (m_connected) {
             return true;
         }
 
-        logWithTimestamp("🔗 正在连接 WebSocket...");
-        logWithTimestamp("📡 目标URL: " + m_webSocket.getUrl());
-        
-        // 打印发送的 Header 信息
-        logWithTimestamp("=== 发送的 HTTP Header ===");
-        logWithTimestamp("X-Api-Resource-Id: volc.bigasr.sauc.duration");
-        logWithTimestamp("X-Api-Access-Key: " + (m_accessToken.length() > 8 ? m_accessToken.substr(0, 4) + "****" + m_accessToken.substr(m_accessToken.length() - 4) : "****"));
-        logWithTimestamp("X-Api-App-Key: " + m_appId);
-        logWithTimestamp("X-Api-Request-Id: " + m_reqId);
-        
+        m_webSocket.setUrl(m_cluster);
+        m_webSocket.disableAutomaticReconnection(); // 禁用自动重连，手动控制
+        m_webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
+            handleMessage(msg);
+        });
+
+        // 启动WebSocket线程
         m_webSocket.start();
         
-        // 等待连接建立
-        int timeout = 0;
-        while (!m_connected && timeout < 300) { // 30秒超时
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            timeout++;
-            
-            // 每5秒打印一次等待信息
-            if (timeout % 50 == 0) {
-                logWithTimestamp("⏳ 等待连接建立... (" + std::to_string(timeout / 10) + "秒)");
-            }
+        // 等待连接建立，但设置超时
+        auto startTime = std::chrono::steady_clock::now();
+        while (!m_webSocket.isConnected() && 
+               std::chrono::steady_clock::now() - startTime < std::chrono::seconds(5)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
+        m_connected = m_webSocket.isConnected();
         return m_connected;
     } catch (const std::exception& e) {
-        logErrorWithTimestamp("❌ 连接到ASR服务失败: " + std::string(e.what()));
+        std::cerr << "[ERROR] ASR connection failed: " << e.what() << std::endl;
         return false;
     }
 }
 
 void AsrClient::disconnect() {
-    if (m_connected) {
-        // 禁用自动重连，避免程序关闭时的重连错误
-        m_webSocket.disableAutomaticReconnection();
-        m_webSocket.stop();
+    try {
+        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            // 如果无法获取锁，强制停止
+            m_webSocket.stop();
+            return;
+        }
+        
+        if (!m_connected) {
+            return;
+        }
+
         m_connected = false;
+        m_webSocket.stop();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] ASR disconnect failed: " << e.what() << std::endl;
     }
 }
 
@@ -452,39 +458,145 @@ void AsrClient::updateHeaders() {
 }
 
 void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
-    switch (msg->type) {
-        case ix::WebSocketMessageType::Message: {
-            if (msg->binary) {
-                // 处理二进制消息
-                if (msg->str.length() >= 2) {
-                    uint8_t messageType = (msg->str[1] & 0xF0) >> 4;
-                    uint8_t flags = msg->str[1] & 0x0F;
+    try {
+        if (!msg) {
+            logErrorWithTimestamp("❌ 收到空的WebSocket消息");
+            return;
+        }
+        
+        switch (msg->type) {
+            case ix::WebSocketMessageType::Message: {
+                if (msg->binary) {
+                    // 处理二进制消息
+                    if (msg->str.length() >= 2) {
+                        uint8_t messageType = (msg->str[1] & 0xF0) >> 4;
+                        uint8_t flags = msg->str[1] & 0x0F;
 
-                    // message type: b1001 (9), flags: b0011 (3)
-                    if (messageType == 0x09 && flags == 0x03) {
-                        std::lock_guard<std::mutex> lock(m_mutex);
-                        m_finalResponseReceived = true;
-                        logWithTimestamp("🎯 收到最终结果响应 (Full Server Response)");
-                        m_cv.notify_one(); // 通知等待的线程
+                        // message type: b1001 (9), flags: b0011 (3)
+                        if (messageType == 0x09 && flags == 0x03) {
+                            // 使用try_lock避免死锁
+                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                            if (lock.owns_lock()) {
+                                m_finalResponseReceived = true;
+                                logWithTimestamp("🎯 收到最终结果响应 (Full Server Response)");
+                                m_cv.notify_one(); // 通知等待的线程
+                            } else {
+                                logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
+                            }
+                        }
                     }
-                }
 #if ASR_ENABLE_PROTOCOL_LOG
-                logWithTimestamp("📨 收到二进制消息，大小: " + std::to_string(msg->wireSize) + " 字节");
-                
-                // 打印前20字节的十六进制
-                logWithTimestamp("🔍 原始数据(前20字节): " + hexString(std::vector<uint8_t>(msg->str.begin(), msg->str.begin() + std::min(size_t(20), msg->str.size()))));
+                    logWithTimestamp("📨 收到二进制消息，大小: " + std::to_string(msg->wireSize) + " 字节");
+                    
+                    // 打印前20字节的十六进制
+                    logWithTimestamp("🔍 原始数据(前20字节): " + hexString(std::vector<uint8_t>(msg->str.begin(), msg->str.begin() + std::min(size_t(20), msg->str.size()))));
 #endif
-                
-                // 解析二进制协议
-                std::string jsonResponse = parseBinaryResponse(msg->str);
-                if (!jsonResponse.empty()) {
+                    
+                    // 解析二进制协议
+                    std::string jsonResponse = parseBinaryResponse(msg->str);
+                    if (!jsonResponse.empty()) {
 #if ASR_ENABLE_PROTOCOL_LOG
-                    logWithTimestamp("🧹 解析后的响应: " + jsonResponse);
+                        logWithTimestamp("🧹 解析后的响应: " + jsonResponse);
+#endif
+                        
+                        // 解析错误信息
+                        if (hasError(jsonResponse)) {
+                            m_lastError = parseErrorResponse(jsonResponse);
+                            logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
+#if ASR_ENABLE_PROTOCOL_LOG
+                            logWithTimestamp("🔍 错误码: " + std::to_string(m_lastError.code));
+                            logWithTimestamp("📝 错误详情: " + m_lastError.message);
+#endif
+                            
+                            if (m_callback) {
+                                m_callback->onError(this, m_lastError.message);
+                            }
+                            return;
+                        }
+                        
+                        // 尝试解析 JSON 获取 log_id 和检查最终响应
+                        try {
+                            if (jsonResponse.empty()) {
+                                logWithTimestamp("⚠️ 收到空的JSON响应");
+                                break;
+                            }
+                            json j = json::parse(jsonResponse);
+                            if (j.contains("result") && j["result"].contains("additions") && 
+                                j["result"]["additions"].contains("log_id")) {
+                                m_logId = j["result"]["additions"]["log_id"];
+#if ASR_ENABLE_PROTOCOL_LOG
+                                logWithTimestamp("🔍 提取到 log_id: " + m_logId);
+#endif
+                            }
+                            
+                            // 检查是否为最终响应
+                            bool isFinalResponse = false;
+                            if (j.contains("result")) {
+                                json result = j["result"];
+                                
+                                // 检查utterances中的definite字段
+                                if (result.contains("utterances") && result["utterances"].is_array()) {
+                                    for (const auto& utterance : result["utterances"]) {
+                                        if (utterance.contains("definite") && utterance["definite"].get<bool>()) {
+                                            isFinalResponse = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // 检查是否有is_final字段
+                                if (result.contains("is_final") && result["is_final"].get<bool>()) {
+                                    isFinalResponse = true;
+                                }
+                            }
+                            
+                            // 如果检测到最终响应，设置标志
+                            if (isFinalResponse) {
+                                // 使用try_lock避免死锁
+                                std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                                if (lock.owns_lock()) {
+                                    m_finalResponseReceived = true;
+                                    logWithTimestamp("🎯 检测到最终识别结果");
+                                    m_cv.notify_one(); // 通知等待的线程
+                                } else {
+                                    logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
+                                }
+                            }
+                            
+                        } catch (const std::exception& e) {
+                            logWithTimestamp("⚠️ 解析Full Server Response失败: " + std::string(e.what()));
+                        }
+                        
+                        if (m_callback && !jsonResponse.empty()) {
+                            m_callback->onMessage(this, jsonResponse);
+                        }
+                        
+                        // 检查是否为Full Server Response或ACK
+                        if (!jsonResponse.empty()) {
+                            if (jsonResponse.find("\"result\"") != std::string::npos ||
+                                jsonResponse.find("\"code\":0") != std::string::npos ||
+                                jsonResponse.find("\"status\":0") != std::string::npos) {
+                                // 使用try_lock避免死锁
+                                std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                                if (lock.owns_lock()) {
+                                    m_readyForAudio = true;
+                                    logWithTimestamp("✅ 识别会话已开始");
+                                    m_cv.notify_one(); // 通知等待的线程
+                                } else {
+                                    logWithTimestamp("⚠️ 无法获取锁，跳过会话开始处理");
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 处理文本消息
+#if ASR_ENABLE_PROTOCOL_LOG
+                    logWithTimestamp("📨 收到文本消息: " + msg->str);
 #endif
                     
                     // 解析错误信息
-                    if (hasError(jsonResponse)) {
-                        m_lastError = parseErrorResponse(jsonResponse);
+                    if (hasError(msg->str)) {
+                        m_lastError = parseErrorResponse(msg->str);
                         logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
 #if ASR_ENABLE_PROTOCOL_LOG
                         logWithTimestamp("🔍 错误码: " + std::to_string(m_lastError.code));
@@ -499,11 +611,11 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                     
                     // 尝试解析 JSON 获取 log_id 和检查最终响应
                     try {
-                        if (jsonResponse.empty()) {
-                            logWithTimestamp("⚠️ 收到空的JSON响应");
+                        if (msg->str.empty()) {
+                            logWithTimestamp("⚠️ 收到空的文本消息");
                             break;
                         }
-                        json j = json::parse(jsonResponse);
+                        json j = json::parse(msg->str);
                         if (j.contains("result") && j["result"].contains("additions") && 
                             j["result"]["additions"].contains("log_id")) {
                             m_logId = j["result"]["additions"]["log_id"];
@@ -535,174 +647,104 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
                         
                         // 如果检测到最终响应，设置标志
                         if (isFinalResponse) {
-                            std::lock_guard<std::mutex> lock(m_mutex);
-                            m_finalResponseReceived = true;
-                            logWithTimestamp("🎯 检测到最终识别结果");
-                            m_cv.notify_one(); // 通知等待的线程
-                        }
-                        
-                    } catch (const std::exception& e) {
-                        logWithTimestamp("⚠️ 解析Full Server Response失败: " + std::string(e.what()));
-                    }
-                    
-                    if (m_callback && !jsonResponse.empty()) {
-                        m_callback->onMessage(this, jsonResponse);
-                    }
-                    
-                    // 检查是否为Full Server Response或ACK
-                    if (!jsonResponse.empty()) {
-                        if (jsonResponse.find("\"result\"") != std::string::npos ||
-                            jsonResponse.find("\"code\":0") != std::string::npos ||
-                            jsonResponse.find("\"status\":0") != std::string::npos) {
-                            m_readyForAudio = true;
-#if ASR_ENABLE_PROTOCOL_LOG
-                            logWithTimestamp("✅ 识别会话已开始");
-#endif
-                        }
-                    }
-                }
-            } else {
-                // 处理文本消息
-#if ASR_ENABLE_PROTOCOL_LOG
-                logWithTimestamp("📨 收到文本消息: " + msg->str);
-#endif
-                
-                // 解析错误信息
-                if (hasError(msg->str)) {
-                    m_lastError = parseErrorResponse(msg->str);
-                    logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
-#if ASR_ENABLE_PROTOCOL_LOG
-                    logWithTimestamp("🔍 错误码: " + std::to_string(m_lastError.code));
-                    logWithTimestamp("📝 错误详情: " + m_lastError.message);
-#endif
-                    
-                    if (m_callback) {
-                        m_callback->onError(this, m_lastError.message);
-                    }
-                    return;
-                }
-                
-                // 尝试解析 JSON 获取 log_id 和检查最终响应
-                try {
-                    if (msg->str.empty()) {
-                        logWithTimestamp("⚠️ 收到空的文本消息");
-                        break;
-                    }
-                    json j = json::parse(msg->str);
-                    if (j.contains("result") && j["result"].contains("additions") && 
-                        j["result"]["additions"].contains("log_id")) {
-                        m_logId = j["result"]["additions"]["log_id"];
-#if ASR_ENABLE_PROTOCOL_LOG
-                        logWithTimestamp("🔍 提取到 log_id: " + m_logId);
-#endif
-                    }
-                    
-                    // 检查是否为最终响应
-                    bool isFinalResponse = false;
-                    if (j.contains("result")) {
-                        json result = j["result"];
-                        
-                        // 检查utterances中的definite字段
-                        if (result.contains("utterances") && result["utterances"].is_array()) {
-                            for (const auto& utterance : result["utterances"]) {
-                                if (utterance.contains("definite") && utterance["definite"].get<bool>()) {
-                                    isFinalResponse = true;
-                                    break;
-                                }
+                            // 使用try_lock避免死锁
+                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                            if (lock.owns_lock()) {
+                                m_finalResponseReceived = true;
+                                logWithTimestamp("🎯 检测到最终识别结果");
+                                m_cv.notify_one(); // 通知等待的线程
+                            } else {
+                                logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
                             }
                         }
                         
-                        // 检查是否有is_final字段
-                        if (result.contains("is_final") && result["is_final"].get<bool>()) {
-                            isFinalResponse = true;
+                    } catch (const std::exception& e) {
+                        logWithTimestamp("⚠️ 解析文本消息JSON失败: " + std::string(e.what()));
+                    }
+                    
+                    if (m_callback && !msg->str.empty()) {
+                        m_callback->onMessage(this, msg->str);
+                    }
+                    
+                    // 检查是否为Full Server Response或ACK
+                    if (!msg->str.empty()) {
+                        if (msg->str.find("\"result\"") != std::string::npos ||
+                            msg->str.find("\"code\":0") != std::string::npos ||
+                            msg->str.find("\"status\":0") != std::string::npos) {
+                            // 使用try_lock避免死锁
+                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                            if (lock.owns_lock()) {
+                                m_readyForAudio = true;
+                                logWithTimestamp("✅ 识别会话已开始");
+                                m_cv.notify_one(); // 通知等待的线程
+                            } else {
+                                logWithTimestamp("⚠️ 无法获取锁，跳过会话开始处理");
+                            }
                         }
                     }
-                    
-                    // 如果检测到最终响应，设置标志
-                    if (isFinalResponse) {
-                        std::lock_guard<std::mutex> lock(m_mutex);
-                        m_finalResponseReceived = true;
-                        logWithTimestamp("🎯 检测到最终识别结果");
-                        m_cv.notify_one(); // 通知等待的线程
-                    }
-                    
-                } catch (const std::exception& e) {
-                    logWithTimestamp("⚠️ 解析文本消息JSON失败: " + std::string(e.what()));
+                }
+                break;
+            }
+            case ix::WebSocketMessageType::Open: {
+                logWithTimestamp("✅ WebSocket 连接已建立");
+                m_connected = true;
+                
+                // 获取响应头
+                const auto& headers = msg->openInfo.headers;
+                for (const auto& header : headers) {
+                    m_responseHeaders[header.first] = header.second;
+                    logWithTimestamp("📋 响应头: " + header.first + ": " + header.second);
                 }
                 
-                if (m_callback && !msg->str.empty()) {
-                    m_callback->onMessage(this, msg->str);
+                // 特别关注 X-Tt-Logid
+                if (headers.find("X-Tt-Logid") != headers.end()) {
+                    logWithTimestamp("🎯 成功获取 X-Tt-Logid: " + headers.at("X-Tt-Logid"));
+                } else {
+                    logWithTimestamp("⚠️  未找到 X-Tt-Logid");
                 }
                 
-                // 检查是否为Full Server Response或ACK
-                if (!msg->str.empty()) {
-                    if (msg->str.find("\"result\"") != std::string::npos ||
-                        msg->str.find("\"code\":0") != std::string::npos ||
-                        msg->str.find("\"status\":0") != std::string::npos) {
-                        m_readyForAudio = true;
-#if ASR_ENABLE_PROTOCOL_LOG
-                        logWithTimestamp("✅ 识别会话已开始");
-#endif
-                    }
+                if (m_callback) {
+                    m_callback->onOpen(this);
                 }
+                break;
             }
-            break;
-        }
-        case ix::WebSocketMessageType::Open: {
-            logWithTimestamp("✅ WebSocket 连接已建立");
-            m_connected = true;
-            
-            // 获取响应头
-            const auto& headers = msg->openInfo.headers;
-            for (const auto& header : headers) {
-                m_responseHeaders[header.first] = header.second;
-                logWithTimestamp("📋 响应头: " + header.first + ": " + header.second);
+            case ix::WebSocketMessageType::Close: {
+                logWithTimestamp("🔌 WebSocket 连接已关闭 (code: " + std::to_string(msg->closeInfo.code) + ", reason: " + msg->closeInfo.reason + ")");
+                m_connected = false;
+                
+                if (m_callback) {
+                    m_callback->onClose(this);
+                }
+                break;
             }
-            
-            // 特别关注 X-Tt-Logid
-            if (headers.find("X-Tt-Logid") != headers.end()) {
-                logWithTimestamp("🎯 成功获取 X-Tt-Logid: " + headers.at("X-Tt-Logid"));
-            } else {
-                logWithTimestamp("⚠️  未找到 X-Tt-Logid");
+            case ix::WebSocketMessageType::Error: {
+                logErrorWithTimestamp("❌ WebSocket 错误: " + msg->errorInfo.reason);
+                logErrorWithTimestamp("🔍 错误详情: HTTP状态=" + std::to_string(msg->errorInfo.http_status) 
+                         + ", 重试次数=" + std::to_string(msg->errorInfo.retries) 
+                         + ", 等待时间=" + std::to_string(msg->errorInfo.wait_time) + "ms");
+                
+                if (m_callback) {
+                    m_callback->onError(this, msg->errorInfo.reason);
+                }
+                break;
             }
-            
-            if (m_callback) {
-                m_callback->onOpen(this);
+            case ix::WebSocketMessageType::Fragment: {
+                logWithTimestamp("📦 收到消息片段");
+                break;
             }
-            break;
-        }
-        case ix::WebSocketMessageType::Close: {
-            logWithTimestamp("🔌 WebSocket 连接已关闭 (code: " + std::to_string(msg->closeInfo.code) + ", reason: " + msg->closeInfo.reason + ")");
-            m_connected = false;
-            
-            if (m_callback) {
-                m_callback->onClose(this);
+            case ix::WebSocketMessageType::Ping: {
+                logWithTimestamp("🏓 收到 Ping");
+                break;
             }
-            break;
-        }
-        case ix::WebSocketMessageType::Error: {
-            logErrorWithTimestamp("❌ WebSocket 错误: " + msg->errorInfo.reason);
-            logErrorWithTimestamp("🔍 错误详情: HTTP状态=" + std::to_string(msg->errorInfo.http_status) 
-                     + ", 重试次数=" + std::to_string(msg->errorInfo.retries) 
-                     + ", 等待时间=" + std::to_string(msg->errorInfo.wait_time) + "ms");
-            
-            if (m_callback) {
-                m_callback->onError(this, msg->errorInfo.reason);
+            case ix::WebSocketMessageType::Pong: {
+                logWithTimestamp("🏓 收到 Pong");
+                break;
             }
-            break;
         }
-        case ix::WebSocketMessageType::Fragment: {
-            logWithTimestamp("📦 收到消息片段");
-            break;
-        }
-        case ix::WebSocketMessageType::Ping: {
-            logWithTimestamp("🏓 收到 Ping");
-            break;
-        }
-        case ix::WebSocketMessageType::Pong: {
-            logWithTimestamp("🏓 收到 Pong");
-            break;
-        }
+    } catch (const std::exception& e) {
+        logErrorWithTimestamp("❌ handleMessage异常: " + std::string(e.what()));
+    } catch (...) {
+        logErrorWithTimestamp("❌ handleMessage发生未知异常");
     }
 }
 
@@ -815,22 +857,23 @@ std::vector<uint8_t> AsrClient::gzipCompress(const std::vector<uint8_t>& data) {
 }
 
 bool AsrClient::waitForResponse(int timeoutMs, std::string* response) {
-    // 等待WebSocket消息响应
-    auto startTime = std::chrono::high_resolution_clock::now();
-    auto timeout = std::chrono::milliseconds(timeoutMs);
+    // 使用条件变量等待响应，避免忙等待
+    std::unique_lock<std::mutex> lock(m_mutex);
     
     // 等待直到收到响应或超时
-    while (std::chrono::high_resolution_clock::now() - startTime < timeout) {
-        // 检查是否已经收到响应
-        if (m_readyForAudio) {
-            if (response) {
+    bool received = m_cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] {
+        return m_readyForAudio || m_finalResponseReceived;
+    });
+    
+    if (received) {
+        if (response) {
+            if (m_readyForAudio) {
                 *response = "Session started"; // 表示会话已开始
+            } else {
+                *response = "Final response received"; // 表示收到最终响应
             }
-            return true;
         }
-        
-        // 短暂等待，避免过度占用CPU
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return true;
     }
     
     // 超时

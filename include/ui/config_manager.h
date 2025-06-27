@@ -49,8 +49,18 @@ struct AsrConfig {
     
     // 状态
     bool isValid = false;
-    std::string configSource;  // "environment_variables", "default_test_config"
+    std::string configSource;  // "environment_variables", "user_config", "trial_mode"
     std::string lastModified;
+};
+
+/**
+ * @brief 配置来源枚举
+ */
+enum class ConfigSource {
+    ENVIRONMENT_VARIABLES,  // 环境变量
+    USER_CONFIG,           // 用户配置文件
+    TRIAL_MODE,            // 体验模式
+    INVALID               // 无效配置
 };
 
 /**
@@ -109,6 +119,78 @@ private:
 };
 
 /**
+ * @brief 配置加载器 - 专门负责配置的加载逻辑
+ */
+class ConfigLoader {
+public:
+    /**
+     * @brief 从环境变量加载ASR凭证
+     * @return 配置对象，如果失败则返回空配置
+     */
+    static AsrConfig loadFromEnvironment();
+    
+    /**
+     * @brief 从用户配置文件加载配置
+     * @param configPath 配置文件路径
+     * @return 配置对象，如果失败则返回空配置
+     */
+    static AsrConfig loadFromUserConfig(const QString& configPath);
+    
+    /**
+     * @brief 加载体验模式配置
+     * @return 体验模式配置对象
+     */
+    static AsrConfig loadTrialModeConfig();
+    
+    /**
+     * @brief 按优先级加载配置
+     * @param configPath 用户配置文件路径
+     * @return 配置对象和来源信息
+     */
+    static std::pair<AsrConfig, ConfigSource> loadConfigWithPriority(const QString& configPath);
+
+private:
+    /**
+     * @brief 检查环境变量是否存在
+     */
+    static bool hasEnvironmentVariables();
+    
+    /**
+     * @brief 检查用户配置文件是否存在且有效
+     */
+    static bool hasValidUserConfig(const QString& configPath);
+};
+
+/**
+ * @brief 配置验证器 - 专门负责配置验证
+ */
+class ConfigValidator {
+public:
+    /**
+     * @brief 验证ASR配置的完整性
+     * @param config 配置对象
+     * @return 是否有效
+     */
+    static bool validateAsrConfig(const AsrConfig& config);
+    
+    /**
+     * @brief 验证音频配置参数
+     * @param config 配置对象
+     * @return 是否有效
+     */
+    static bool validateAudioConfig(const AsrConfig& config);
+    
+    /**
+     * @brief 获取验证错误信息
+     * @return 错误信息列表
+     */
+    static QStringList getValidationErrors();
+
+private:
+    static QStringList validationErrors_;
+};
+
+/**
  * @brief 配置管理器
  * 
  * 负责管理ASR配置的加载、保存和验证
@@ -124,7 +206,7 @@ public:
     static ConfigManager* instance();
     
     /**
-     * @brief 加载配置
+     * @brief 加载配置（重构后的简化版本）
      * @return 配置对象
      */
     AsrConfig loadConfig();
@@ -262,17 +344,15 @@ private:
      * @return 配置对象
      */
     AsrConfig jsonToConfig(const QJsonObject& json);
-    
+
     // 成员变量
     QString configFilePath_;
     AsrConfig currentConfig_;
     bool configLoaded_;
+    ConfigSource currentConfigSource_;
     
     // 默认测试配置（软件发布方提供）
     struct DefaultConfig {
-        //std::string appId = "8388344882";
-        //std::string accessToken = "vQWuOVrgH6J0kCAoHcQZ_wZfA5q1111";    //无效配置，你需要自己写。
-        //std::string secretKey = "oKzfTdLm0M2dVUXUKW86jb-hFLGP1111";
         std::string format = "wav";
         int sampleRate = 16000;
         int bits = 16;

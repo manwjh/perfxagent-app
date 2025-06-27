@@ -184,7 +184,9 @@ AudioToTextWindow::AudioToTextWindow(QWidget *parent)
     try {
         fileImporter_ = std::make_unique<audio::FileImporter>();
         audioConverter_ = std::make_unique<audio::AudioConverter>();
-        asrManager_ = std::make_unique<Asr::AsrManager>();
+        
+        // 使用单例模式的ASR管理器，而不是创建新实例
+        asrManager_ = &Asr::AsrManager::instance();
         
         if (!audioConverter_) {
             std::cerr << "[AUDIO-THREAD][ERROR] Failed to create AudioConverter" << std::endl;
@@ -239,12 +241,7 @@ AudioToTextWindow::~AudioToTextWindow() {
         asrCallback_.reset();
         std::cout << "[ASR-THREAD] ASR callback cleaned up" << std::endl;
     }
-    // 清理 ASR 管理器
-    if (asrManager_) {
-        std::cout << "[ASR-THREAD] Cleaning up ASR manager..." << std::endl;
-        asrManager_.reset();
-        std::cout << "[ASR-THREAD] ASR manager cleaned up" << std::endl;
-    }
+    // 注意：asrManager_现在是单例模式的指针，不需要手动清理
     // 清理音频转换器
     if (audioConverter_) {
         std::cout << "[AUDIO-THREAD] Cleaning up audio converter..." << std::endl;

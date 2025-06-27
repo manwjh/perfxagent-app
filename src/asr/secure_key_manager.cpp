@@ -1,8 +1,23 @@
 #include "asr/secure_key_manager.h"
 #include <cstdlib>
 #include <iostream>
+#include <string>
+#include <QString>
 
 namespace Asr {
+
+// 敏感信息隐码处理函数 (std::string版本)
+std::string maskSensitiveInfo(const std::string& input, int visibleStart, int visibleEnd) {
+    if (input.length() <= static_cast<size_t>(visibleStart + visibleEnd)) {
+        // 如果字符串太短，只显示首尾各1个字符
+        if (input.length() <= 2) {
+            return input;
+        }
+        return input.substr(0, 1) + std::string(input.length() - 2, '*') + input.substr(input.length() - 1);
+    }
+    
+    return input.substr(0, visibleStart) + std::string(input.length() - visibleStart - visibleEnd, '*') + input.substr(input.length() - visibleEnd);
+}
 
 // ============================================================================
 // SecureKeyManager 实现
@@ -94,7 +109,7 @@ std::string SecureKeyManager::getAccessToken() {
     if (userAccessToken) {
         std::cout << "🔐 [SecureKeyManager] 使用环境变量中的Access Token" << std::endl;
         std::cout << "   - 来源: ASR_ACCESS_TOKEN 环境变量" << std::endl;
-        std::cout << "   - Access Token: " << userAccessToken << std::endl;
+        std::cout << "   - Access Token: " << maskSensitiveInfo(std::string(userAccessToken)) << std::endl;
         return userAccessToken;
     }
     
@@ -102,7 +117,7 @@ std::string SecureKeyManager::getAccessToken() {
     std::string obfuscatedAccessToken = deobfuscateString(getObfuscatedAccessToken());
     std::cout << "🔐 [SecureKeyManager] 使用混淆配置中的Access Token" << std::endl;
     std::cout << "   - 来源: 厂商配置 (体验模式)" << std::endl;
-    std::cout << "   - Access Token: " << obfuscatedAccessToken << std::endl;
+    std::cout << "   - Access Token: " << maskSensitiveInfo(obfuscatedAccessToken) << std::endl;
     std::cout << "   - 生成工具: scripts/generate_obfuscated_keys.py" << std::endl;
     return obfuscatedAccessToken;
 }
@@ -113,7 +128,7 @@ std::string SecureKeyManager::getSecretKey() {
     if (userSecretKey) {
         std::cout << "🔐 [SecureKeyManager] 使用环境变量中的Secret Key" << std::endl;
         std::cout << "   - 来源: ASR_SECRET_KEY 环境变量" << std::endl;
-        std::cout << "   - Secret Key: " << userSecretKey << std::endl;
+        std::cout << "   - Secret Key: " << maskSensitiveInfo(std::string(userSecretKey)) << std::endl;
         return userSecretKey;
     }
     
@@ -121,7 +136,7 @@ std::string SecureKeyManager::getSecretKey() {
     std::string obfuscatedSecretKey = deobfuscateString(getObfuscatedSecretKey());
     std::cout << "🔐 [SecureKeyManager] 使用混淆配置中的Secret Key" << std::endl;
     std::cout << "   - 来源: 厂商混淆配置 (体验模式)" << std::endl;
-    std::cout << "   - Secret Key: " << obfuscatedSecretKey << std::endl;
+    std::cout << "   - Secret Key: " << maskSensitiveInfo(obfuscatedSecretKey) << std::endl;
     std::cout << "   - 生成工具: scripts/generate_obfuscated_keys.py" << std::endl;
     return obfuscatedSecretKey;
 }
@@ -142,7 +157,7 @@ bool SecureKeyManager::isTrialMode() {
         std::cout << "   - 当前模式: 用户配置模式 (User Config Mode)" << std::endl;
         std::cout << "   - 使用环境变量配置" << std::endl;
         std::cout << "   - App ID: " << userAppId << std::endl;
-        std::cout << "   - Access Token: " << userAccessToken << std::endl;
+        std::cout << "   - Access Token: " << maskSensitiveInfo(std::string(userAccessToken)) << std::endl;
     }
     
     // 如果没有用户配置，则为体验模式（从代码空间获取凭证）

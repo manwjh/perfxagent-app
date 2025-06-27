@@ -1,6 +1,6 @@
 {
-  "name": "perfxagent-asr",
-  "version": "1.6.2",
+  "name": "perfxagent-app",
+  "version": "1.7.0",
   "description": "PerfXAgent客户端应用程序",
   "main": "src/main.js",
   "scripts": {

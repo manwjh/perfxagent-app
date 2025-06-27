@@ -98,6 +98,9 @@ private:
     QTimer* statusTimer_;
 
     QHBoxLayout* buttonLayout_;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
 };
 
 } // namespace perfx

@@ -124,7 +124,7 @@ RealtimeAudioToTextWindow::RealtimeAudioToTextWindow(QWidget *parent)
     setupStatusBar();
     setupBottomControls();
     connectSignals();
-    updateStatusBar("待机中 - 选择音频源开始录音");
+    updateStatusBarSuccess("待机中 - 选择音频源开始录音");
     updateRecordingButtons();
     controller_->refreshAudioDevices();
 }
@@ -186,12 +186,13 @@ void RealtimeAudioToTextWindow::setupUI() {
     
     mainLayout_->addWidget(textEdit_, 1);
 
-    // 伪状态栏
-    QHBoxLayout* statusLayout = new QHBoxLayout();
-    statusLabel_ = new QLabel("Ready", this);
-    statusLabel_->setStyleSheet("QLabel { color: #d0d0d0; background: transparent;}");
-    statusLayout->addWidget(statusLabel_);
-    mainLayout_->addLayout(statusLayout);
+    // 创建状态栏并设置为透明背景
+    statusBar_ = new QStatusBar(this);
+    statusBar_->setStyleSheet("QStatusBar { background-color: transparent; border: none; }");
+    statusLabel_ = new QLabel("就绪", this);
+    statusLabel_->setStyleSheet("QLabel { color: #FFFFFF; background: transparent; }");
+    statusBar_->addWidget(statusLabel_);
+    mainLayout_->addWidget(statusBar_);
 
     mainLayout_->setStretch(0, 0); // menuBar
     mainLayout_->setStretch(1, 5); // textEdit_
@@ -308,85 +309,199 @@ void RealtimeAudioToTextWindow::connectSignals() {
 }
 
 void RealtimeAudioToTextWindow::toggleRecording() {
-    if (!isRecording_) {
-        // 检查ASR状态
-        if (perfx::ui::asr_valid == 0) {
-            QMessageBox::warning(this, "ASR未就绪", 
-                "ASR配置未验证或验证失败。");
-            return;
-        }
-        
-        // 检查麦克风状态
-        if (perfx::ui::mic_valid == 0) {
-            QMessageBox::warning(this, "麦克风未就绪", 
-                "请先选择有效的音频源。");
-            return;
-        }
-        
-        // 录音前确保ASR线程已启动
-        if (controller_ && !controller_->isAsrThreadRunning()) {
-            controller_->startAsrThread();
-        }
-        
-        // Start recording
-        if (controller_->startRecording()) {
-            isRecording_ = true;
-            isPaused_ = false;
-            recordingStartTime_ = QDateTime::currentMSecsSinceEpoch();
-            timer_->start(100); // Update timer every 100ms
-            updateStatusBar("录音中...");
-            
-            // 启动实时ASR
-            if (controller_) {
-                controller_->enableRealtimeAsr(true);
+    try {
+        if (!isRecording_) {
+            // 检查ASR状态
+            if (perfx::ui::asr_valid == 0) {
+                QMessageBox::warning(this, "ASR未就绪", 
+                    "ASR配置未验证或验证失败。");
+                return;
             }
-        }
-    } else {
-        // Pause/Resume recording
-        isPaused_ = !isPaused_;
-        if (isPaused_) {
-            controller_->pauseRecording();
-            updateStatusBar("录音已暂停");
             
-            // 暂停时禁用实时ASR
-            if (controller_) {
-                controller_->enableRealtimeAsr(false);
+            // 检查麦克风状态
+            if (perfx::ui::mic_valid == 0) {
+                QMessageBox::warning(this, "麦克风未就绪", 
+                    "请先选择有效的音频源。");
+                return;
+            }
+            
+            // 录音前确保ASR线程已启动
+            if (controller_ && !controller_->isAsrThreadRunning()) {
+                try {
+                    controller_->startAsrThread();
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Exception starting ASR thread: " << e.what() << std::endl;
+                    QMessageBox::critical(this, "ASR错误", 
+                        QString("启动ASR线程失败: %1").arg(e.what()));
+                    return;
+                } catch (...) {
+                    std::cerr << "[ERROR] Unknown exception starting ASR thread" << std::endl;
+                    QMessageBox::critical(this, "ASR错误", "启动ASR线程时发生未知错误");
+                    return;
+                }
+            }
+            
+            // Start recording
+            bool recordingStarted = false;
+            try {
+                recordingStarted = controller_->startRecording();
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Exception starting recording: " << e.what() << std::endl;
+                QMessageBox::critical(this, "录音错误", 
+                    QString("启动录音失败: %1").arg(e.what()));
+                return;
+            } catch (...) {
+                std::cerr << "[ERROR] Unknown exception starting recording" << std::endl;
+                QMessageBox::critical(this, "录音错误", "启动录音时发生未知错误");
+                return;
+            }
+            
+            if (recordingStarted) {
+                isRecording_ = true;
+                isPaused_ = false;
+                recordingStartTime_ = QDateTime::currentMSecsSinceEpoch();
+                timer_->start(100); // Update timer every 100ms
+                updateStatusBarSuccess("录音中...");
+                
+                // 启动实时ASR
+                if (controller_) {
+                    try {
+                        controller_->enableRealtimeAsr(true);
+                    } catch (const std::exception& e) {
+                        std::cerr << "[ERROR] Exception enabling realtime ASR: " << e.what() << std::endl;
+                        // 不阻止录音，但显示警告
+                        QMessageBox::warning(this, "ASR警告", 
+                            QString("实时ASR启动失败，录音将继续但无实时转写: %1").arg(e.what()));
+                    } catch (...) {
+                        std::cerr << "[ERROR] Unknown exception enabling realtime ASR" << std::endl;
+                        QMessageBox::warning(this, "ASR警告", "实时ASR启动时发生未知错误，录音将继续但无实时转写");
+                    }
+                }
+            } else {
+                QMessageBox::critical(this, "录音错误", "启动录音失败");
+                return;
             }
         } else {
-            controller_->resumeRecording();
-            updateStatusBar("录音中...");
-            
-            // 恢复时重新启用实时ASR
-            if (controller_) {
-                controller_->enableRealtimeAsr(true);
+            // Pause/Resume recording
+            isPaused_ = !isPaused_;
+            if (isPaused_) {
+                try {
+                    controller_->pauseRecording();
+                    updateStatusBarWarning("录音已暂停");
+                    
+                    // 暂停时禁用实时ASR
+                    if (controller_) {
+                        try {
+                            controller_->enableRealtimeAsr(false);
+                        } catch (const std::exception& e) {
+                            std::cerr << "[ERROR] Exception disabling realtime ASR: " << e.what() << std::endl;
+                        } catch (...) {
+                            std::cerr << "[ERROR] Unknown exception disabling realtime ASR" << std::endl;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Exception pausing recording: " << e.what() << std::endl;
+                    QMessageBox::warning(this, "录音警告", 
+                        QString("暂停录音时发生错误: %1").arg(e.what()));
+                } catch (...) {
+                    std::cerr << "[ERROR] Unknown exception pausing recording" << std::endl;
+                    QMessageBox::warning(this, "录音警告", "暂停录音时发生未知错误");
+                }
+            } else {
+                try {
+                    controller_->resumeRecording();
+                    updateStatusBarSuccess("录音中...");
+                    
+                    // 恢复时重新启用实时ASR
+                    if (controller_) {
+                        try {
+                            controller_->enableRealtimeAsr(true);
+                        } catch (const std::exception& e) {
+                            std::cerr << "[ERROR] Exception re-enabling realtime ASR: " << e.what() << std::endl;
+                            QMessageBox::warning(this, "ASR警告", 
+                                QString("重新启用实时ASR失败: %1").arg(e.what()));
+                        } catch (...) {
+                            std::cerr << "[ERROR] Unknown exception re-enabling realtime ASR" << std::endl;
+                            QMessageBox::warning(this, "ASR警告", "重新启用实时ASR时发生未知错误");
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Exception resuming recording: " << e.what() << std::endl;
+                    QMessageBox::warning(this, "录音警告", 
+                        QString("恢复录音时发生错误: %1").arg(e.what()));
+                } catch (...) {
+                    std::cerr << "[ERROR] Unknown exception resuming recording" << std::endl;
+                    QMessageBox::warning(this, "录音警告", "恢复录音时发生未知错误");
+                }
             }
         }
+        updateRecordingButtons();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Exception in toggleRecording: " << e.what() << std::endl;
+        QMessageBox::critical(this, "系统错误", 
+            QString("录音操作时发生系统错误: %1").arg(e.what()));
+    } catch (...) {
+        std::cerr << "[ERROR] Unknown exception in toggleRecording" << std::endl;
+        QMessageBox::critical(this, "系统错误", "录音操作时发生未知系统错误");
     }
-    updateRecordingButtons();
 }
 
 void RealtimeAudioToTextWindow::stopRecording() {
-    std::cout << "[UI] stopRecording() called, isRecording_: " << isRecording_ << std::endl;
-    if (!isRecording_ && !isPaused_) return;
+    try {
+        std::cout << "[UI] stopRecording() called, isRecording_: " << isRecording_ << std::endl;
+        if (!isRecording_ && !isPaused_) return;
 
-    if (controller_) {
-        controller_->stopRecording();
-        // 停止录音时禁用ASR
-        controller_->enableRealtimeAsr(false);
-        // 停止录音时关闭ASR线程
-        controller_->stopAsrThread();
+        if (controller_) {
+            try {
+                controller_->stopRecording();
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Exception stopping recording: " << e.what() << std::endl;
+                QMessageBox::warning(this, "录音警告", 
+                    QString("停止录音时发生错误: %1").arg(e.what()));
+            } catch (...) {
+                std::cerr << "[ERROR] Unknown exception stopping recording" << std::endl;
+                QMessageBox::warning(this, "录音警告", "停止录音时发生未知错误");
+            }
+            
+            // 停止录音时禁用ASR
+            try {
+                controller_->enableRealtimeAsr(false);
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Exception disabling ASR: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "[ERROR] Unknown exception disabling ASR" << std::endl;
+            }
+            
+            // 停止录音时关闭ASR线程
+            try {
+                controller_->stopAsrThread();
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Exception stopping ASR thread: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "[ERROR] Unknown exception stopping ASR thread" << std::endl;
+            }
+        }
+        
+        isRecording_ = false;
+        isPaused_ = false;
+        timer_->stop();
+        updateStatusBarSuccess("待机中 - 选择音频源开始录音");
+        updateRecordingButtons();
+        
+        // 清空UI和控制器状态
+        clearTranscription();
+        
+        std::cout << "[AUDIO-THREAD] Recording stopped." << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Exception in stopRecording: " << e.what() << std::endl;
+        QMessageBox::critical(this, "系统错误", 
+            QString("停止录音时发生系统错误: %1").arg(e.what()));
+    } catch (...) {
+        std::cerr << "[ERROR] Unknown exception in stopRecording" << std::endl;
+        QMessageBox::critical(this, "系统错误", "停止录音时发生未知系统错误");
     }
-    
-    isRecording_ = false;
-    isPaused_ = false;
-    timer_->stop();
-    updateStatusBar("待机中 - 选择音频源开始录音");
-    updateRecordingButtons();
-    
-    // 清空UI和控制器状态
-    clearTranscription();
-    
-    std::cout << "[AUDIO-THREAD] Recording stopped." << std::endl;
 }
 
 void RealtimeAudioToTextWindow::updateRecordingButtons() {
@@ -448,13 +563,17 @@ void RealtimeAudioToTextWindow::downloadText() {
     QTextStream out(&file);
     out << textEdit_->toPlainText();
     file.close();
-    updateStatusBar("Transcript saved to " + fileName);
+    updateStatusBarSuccess("转写文本已保存到 " + fileName);
 }
 
 void RealtimeAudioToTextWindow::onDeviceSelectionResult(bool success, const QString& message) {
-    updateStatusBar(message);
+    if (success) {
+        updateStatusBarSuccess(message);
+    } else {
+        updateStatusBarError(message);
+    }
     if (!success) {
-        QMessageBox::warning(this, "Device Error", message);
+        QMessageBox::warning(this, "设备错误", message);
     }
 }
 
@@ -478,6 +597,32 @@ void RealtimeAudioToTextWindow::onAudioSourceChanged(int index) {
 void RealtimeAudioToTextWindow::updateStatusBar(const QString& message) {
     if (statusLabel_) {
         statusLabel_->setText(message);
+        // 默认使用白色（成功类信息）
+        statusLabel_->setStyleSheet("QLabel { color: #FFFFFF; background: transparent; }");
+    }
+}
+
+void RealtimeAudioToTextWindow::updateStatusBarSuccess(const QString& message) {
+    if (statusLabel_) {
+        statusLabel_->setText(message);
+        // 成功类信息显示为白字
+        statusLabel_->setStyleSheet("QLabel { color: #FFFFFF; background: transparent; }");
+    }
+}
+
+void RealtimeAudioToTextWindow::updateStatusBarWarning(const QString& message) {
+    if (statusLabel_) {
+        statusLabel_->setText(message);
+        // 警告类信息显示为红字
+        statusLabel_->setStyleSheet("QLabel { color: #FF0000; background: transparent; }");
+    }
+}
+
+void RealtimeAudioToTextWindow::updateStatusBarError(const QString& message) {
+    if (statusLabel_) {
+        statusLabel_->setText(message);
+        // 失败类信息显示为黄字
+        statusLabel_->setStyleSheet("QLabel { color: #FFFF00; background: transparent; }");
     }
 }
 
@@ -521,10 +666,15 @@ void RealtimeAudioToTextWindow::onAsrTranscriptionUpdated(const QString& text, b
     if (text.isEmpty()) return;
 
     // 目前 text 是多行字符串，无法区分 definite，全部视为 definite=true
-    finalLines_.clear();
+    // 不要清空finalLines_，而是累积新的文本
     QStringList lines = text.split('\n', Qt::SkipEmptyParts);
     for (const QString& line : lines) {
-        if (!line.isEmpty()) finalLines_ << line;
+        if (!line.isEmpty()) {
+            // 检查是否已经存在相同的行，避免重复添加
+            if (!finalLines_.contains(line)) {
+                finalLines_ << line;
+            }
+        }
     }
     // 预览区暂不处理（因无结构化数据）
     QString displayText = finalLines_.join("\n");
@@ -536,18 +686,64 @@ void RealtimeAudioToTextWindow::onAsrTranscriptionUpdated(const QString& text, b
 }
 
 void RealtimeAudioToTextWindow::onAsrError(const QString& error) {
-    QMessageBox::warning(this, "ASR Error", error);
-    statusLabel_->setText("ASR: Error");
-    statusLabel_->setStyleSheet("color: red;");
+    try {
+        std::cerr << "[ERROR] ASR Error received: " << error.toStdString() << std::endl;
+        
+        // 显示错误信息
+        QMessageBox::warning(this, "ASR错误", error);
+        updateStatusBarWarning("ASR: 连接错误");
+        
+        // 如果正在录音，尝试自动恢复ASR连接
+        if (isRecording_ && !isPaused_ && controller_) {
+            std::cout << "[INFO] Attempting to recover ASR connection..." << std::endl;
+            
+            // 延迟一秒后尝试重新连接，避免立即重连
+            QTimer::singleShot(1000, [this]() {
+                try {
+                    if (controller_) {
+                        // 重置ASR状态
+                        controller_->resetAsrState();
+                        
+                        // 重新启动ASR（startAsrThread返回void，不能用作条件判断）
+                        controller_->startAsrThread();
+                        
+                        // 检查ASR线程是否成功启动
+                        if (controller_->isAsrThreadRunning()) {
+                            std::cout << "[INFO] ASR recovery successful" << std::endl;
+                            updateStatusBarSuccess("ASR: 连接已恢复");
+                        } else {
+                            std::cout << "[WARNING] ASR recovery failed" << std::endl;
+                            updateStatusBarWarning("ASR: 自动恢复失败");
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Exception during ASR recovery: " << e.what() << std::endl;
+                    updateStatusBarError("ASR: 恢复时发生异常");
+                } catch (...) {
+                    std::cerr << "[ERROR] Unknown exception during ASR recovery" << std::endl;
+                    updateStatusBarError("ASR: 恢复时发生未知异常");
+                }
+            });
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Exception in onAsrError: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "[ERROR] Unknown exception in onAsrError" << std::endl;
+    }
 }
 
 void RealtimeAudioToTextWindow::onAsrConnectionStatusChanged(bool connected) {
-    statusLabel_->setText(connected ? "ASR: Connected" : "ASR: Disconnected");
-    statusLabel_->setStyleSheet(connected ? "color: green;" : "color: red;");
+    if (connected) {
+        updateStatusBarSuccess("ASR: 已连接");
+    } else {
+        updateStatusBarWarning("ASR: 连接断开");
+    }
 }
 
 void RealtimeAudioToTextWindow::onAsrUtterancesUpdated(const QList<QVariantMap>& utterances) {
-    QStringList lines;
+    // 不要每次都清空lines，而是累积新的内容
+    QStringList newLines;
     QString previewLine;
 
     // 合并短句的最小长度
@@ -556,11 +752,11 @@ void RealtimeAudioToTextWindow::onAsrUtterancesUpdated(const QList<QVariantMap>&
     for (const auto& utter : utterances) {
         if (utter["definite"].toBool()) {
             QString txt = utter["text"].toString();
-            if (txt.length() < minLineLen && !lines.isEmpty()) {
+            if (txt.length() < minLineLen && !newLines.isEmpty()) {
                 // 合并到上一行
-                lines.last() += txt;
+                newLines.last() += txt;
             } else {
-                lines << txt;
+                newLines << txt;
             }
         } else {
             // 预览区
@@ -573,7 +769,15 @@ void RealtimeAudioToTextWindow::onAsrUtterancesUpdated(const QList<QVariantMap>&
         }
     }
 
-    QString displayText = lines.join("<br>");
+    // 将新的最终行添加到finalLines_中，避免重复
+    for (const QString& line : newLines) {
+        if (!line.isEmpty() && !finalLines_.contains(line)) {
+            finalLines_ << line;
+        }
+    }
+
+    // 构建显示文本
+    QString displayText = finalLines_.join("<br>");
     if (!previewLine.isEmpty()) {
         displayText += "<span style='color:gray;font-style:italic'>" + previewLine + "</span>";
     }
@@ -686,7 +890,7 @@ void RealtimeAudioToTextWindow::backToMainMenu() {
     clearTranscription();
     
     // 重置UI状态
-    updateStatusBar("已返回主菜单");
+    updateStatusBarSuccess("已返回主菜单");
     updateRecordingButtons();
     
     std::cout << "[UI] backToMainMenu() completed, emitting signal" << std::endl;

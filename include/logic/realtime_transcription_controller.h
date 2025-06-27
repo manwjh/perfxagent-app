@@ -73,6 +73,9 @@ public:
     void startAsrThread();
     void stopAsrThread();
     
+    // 新增：清理和重置ASR状态
+    void resetAsrState();
+    
     // 转录文本管理
     void setCumulativeTranscriptionText(const QString& text) { cumulativeTranscriptionText_ = text; }
     QString getCumulativeTranscriptionText() const { return cumulativeTranscriptionText_; }
@@ -92,6 +95,11 @@ signals:
     void asrError(const QString& errorMessage);
     void asrUtterancesUpdated(const QList<QVariantMap>& utterances);
 
+public slots:
+    void onAsrTranscriptionUpdated(const QString& text, bool isFinal);
+    void onAsrError(const QString& errorMessage);
+    void onAsrConnectionStatusChanged(bool connected);
+
 private slots:
     void onWaveformTimerTimeout();
 
@@ -104,7 +112,7 @@ private:
     
     // 实时ASR相关方法
     void processAsrAudio(const void* data, size_t frameCount);
-    void sendAsrAudioPacket(const std::vector<uint8_t>& audioData, bool isLast);
+    bool sendAsrAudioPacket(const std::vector<uint8_t>& audioData, bool isLast);
 
     std::unique_ptr<audio::AudioManager> audioManager_;
     QTimer* waveformTimer_;  // 波形更新定时器
@@ -120,12 +128,15 @@ private:
 
     // 实时ASR状态
     bool realtimeAsrEnabled_ = false;
-    std::unique_ptr<Asr::AsrManager> realtimeAsrManager_;
+    Asr::AsrManager* realtimeAsrManager_;  // 使用单例模式，改为普通指针
     std::unique_ptr<RealtimeAsrCallback> realtimeAsrCallback_;
     std::mutex asrMutex_;
     std::vector<uint8_t> asrAudioBuffer_;
     size_t asrBufferSize_ = 0;
     static constexpr size_t ASR_PACKET_SIZE = 16000 * 2 * 100 / 1000; // 100ms @ 16kHz INT16
+    
+    // 录音统计
+    size_t recordedBytes_ = 0;
     
     // 转录内容累积
     QString cumulativeTranscriptionText_;  // 累积的转录文本

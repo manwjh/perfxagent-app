@@ -5,6 +5,7 @@
 #include "asr/asr_log_utils.h"
 #include "asr/asr_client.h"
 #include "ui/config_manager.h"  // 添加SecureKeyManager的头文件
+#include "asr/secure_key_manager.h"
 #include <iostream>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
@@ -94,6 +95,30 @@ public:
 // AsrManager 类实现
 // ============================================================================
 
+// ============================================================================
+// 单例模式实现
+// ============================================================================
+
+static std::unique_ptr<AsrManager> s_instance = nullptr;
+static std::mutex s_instanceMutex;
+
+AsrManager& AsrManager::instance() {
+    std::lock_guard<std::mutex> lock(s_instanceMutex);
+    if (!s_instance) {
+        s_instance = std::make_unique<AsrManager>();
+    }
+    return *s_instance;
+}
+
+void AsrManager::destroyInstance() {
+    std::lock_guard<std::mutex> lock(s_instanceMutex);
+    s_instance.reset();
+}
+
+// ============================================================================
+// 构造函数和析构函数
+// ============================================================================
+
 AsrManager::AsrManager()
     : m_status(AsrStatus::DISCONNECTED),
       m_callback(nullptr),
@@ -178,36 +203,56 @@ std::string AsrManager::getAudioStats() const {
 // ============================================================================
 
 bool AsrManager::connect() {
-    // 如果客户端已存在且已连接，直接返回
-    if (m_client && m_client->isConnected()) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "ℹ️ ASR 客户端已经连接");
+    try {
+        // 如果客户端已存在且已连接，直接返回
+        if (m_client && m_client->isConnected()) {
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "ℹ️ ASR 客户端已经连接");
+            return true;
+        }
+        
+        updateStatus(AsrStatus::CONNECTING);
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "🔗 正在连接 ASR 服务器...");
+        
+        // 创建并初始化客户端
+        if (!initializeClient()) {
+            updateStatus(AsrStatus::ERROR);
+            return false;
+        }
+        
+        // 连接客户端，并等待连接成功
+        if (!m_client->connect()) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 客户端连接失败", true);
+            updateStatus(AsrStatus::ERROR);
+            return false;
+        }
+        
+        // 等待连接稳定
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // 再次检查连接状态
+        if (!m_client || !m_client->isConnected()) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 连接不稳定", true);
+            updateStatus(AsrStatus::ERROR);
+            return false;
+        }
+        
+        // 连接成功后更新状态
+        updateStatus(AsrStatus::CONNECTED);
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR 连接成功");
+        
+        // 启动会话计时器
+        startSessionTimer();
+        
         return true;
-    }
-    
-    updateStatus(AsrStatus::CONNECTING);
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔗 正在连接 ASR 服务器...");
-    
-    // 创建并初始化客户端
-    if (!initializeClient()) {
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 连接异常: " + std::string(e.what()), true);
+        updateStatus(AsrStatus::ERROR);
+        return false;
+    } catch (...) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 连接发生未知异常", true);
         updateStatus(AsrStatus::ERROR);
         return false;
     }
-    
-    // 连接客户端，并等待连接成功
-    if (!m_client->connect()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 客户端连接失败", true);
-        updateStatus(AsrStatus::ERROR);
-        return false;
-    }
-    
-    // 连接成功后更新状态
-    updateStatus(AsrStatus::CONNECTED);
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR 连接成功");
-    
-    // 启动会话计时器
-    startSessionTimer();
-    
-    return true;
 }
 
 void AsrManager::disconnect() {
@@ -2022,48 +2067,6 @@ bool AsrManager::createDataDirectory() const {
 
 void AsrManager::logStats(const std::string& message) const {
     logMessage(m_config.logLevel, ASR_LOG_DEBUG, "[统计] " + message);
-}
-
-void AsrManager::logMessage(const std::string& prefix, const std::string& message) {
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    auto timestamp = std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
-    std::cout << "[" << timestamp << "] " << prefix << " " << message << std::endl;
-}
-
-bool AsrManager::loadCredentials() {
-    // 检查环境变量
-    const char* userAppId = std::getenv("ASR_APP_ID");
-    const char* userAccessToken = std::getenv("ASR_ACCESS_TOKEN");
-    const char* userSecretKey = std::getenv("ASR_SECRET_KEY");
-    
-    if (userAppId && userAccessToken) {
-        std::cout << "[ASR-CRED] 使用环境变量中的凭据" << std::endl;
-        creds_.appId = userAppId;
-        creds_.accessToken = userAccessToken;
-        creds_.secretKey = userSecretKey ? userSecretKey : "";
-        creds_.isValid = true;
-        return true;
-    } else {
-        std::cout << "[ASR-CRED] 环境变量未设置，使用体验模式配置" << std::endl;
-        std::cout << "   建议设置环境变量：" << std::endl;
-        std::cout << "   export ASR_APP_ID=your_app_id" << std::endl;
-        std::cout << "   export ASR_ACCESS_TOKEN=your_access_token" << std::endl;
-        std::cout << "   export ASR_SECRET_KEY=your_secret_key" << std::endl;
-        std::cout << "   或者使用 VOLC_ 前缀：" << std::endl;
-        std::cout << "   export VOLC_APP_ID=your_app_id" << std::endl;
-        std::cout << "   export VOLC_ACCESS_TOKEN=your_access_token" << std::endl;
-        std::cout << "   export VOLC_SECRET_KEY=your_secret_key" << std::endl;
-        
-        // 使用混淆的API密钥（体验模式）
-        creds_.appId = SecureKeyManager::getAppId();
-        creds_.accessToken = SecureKeyManager::getAccessToken();
-        creds_.secretKey = SecureKeyManager::getSecretKey();
-        creds_.isValid = true;
-        
-        std::cout << "[ASR-CRED] 体验模式：请确保使用次数未超过限制" << std::endl;
-        return true;
-    }
 }
 
 } // namespace Asr 

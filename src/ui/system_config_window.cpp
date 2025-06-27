@@ -1,6 +1,7 @@
 #include "ui/system_config_window.h"
 #include "ui/about_project_widget.h"
 #include "ui/config_manager.h"
+#include "ui/input_method_manager.h"
 #include <QApplication>
 #include <QStyle>
 #include <QMessageBox>
@@ -13,7 +14,9 @@
 #include <QScrollArea>
 #include <QFrame>
 #include "asr/asr_manager.h"
+#include "asr/secure_key_manager.h"
 #include "ui/global_state.h"
+#include "ui/ui_effects_manager.h"
 #include <iostream>
 
 namespace perfx {
@@ -42,10 +45,16 @@ SystemConfigWindow::SystemConfigWindow(QWidget* parent)
     , statusTimer_(nullptr)
     , buttonLayout_(nullptr)
 {
+    // 使用输入法管理器优化窗口
+    InputMethodManager::instance()->optimizeWindow(this);
+    
     // 获取配置管理器实例
     configManager_ = ConfigManager::instance();
     
     setupUI();
+    
+    // 优化所有输入控件
+    InputMethodManager::instance()->optimizeAllInputWidgets(this);
     
     // 设置状态定时器 - 移到loadCurrentConfig之前
     statusTimer_ = new QTimer(this);
@@ -69,99 +78,75 @@ SystemConfigWindow::~SystemConfigWindow() = default;
 void SystemConfigWindow::setupUI() {
     // 设置窗口属性
     setWindowTitle("系统配置");
-    setFixedSize(600, 700); // 增加窗口大小以适应新设计
+    setFixedSize(600, 800); // 增加窗口高度以呼吸
     
     // 主布局
     mainLayout_ = new QVBoxLayout(this);
     mainLayout_->setSpacing(0);
     mainLayout_->setContentsMargins(0, 0, 0, 0);
-    
-    // 设置整体样式（深色风格）
-    setStyleSheet(
-        "QWidget, QFrame, QGroupBox, QScrollArea, QComboBox, QProgressBar {"
-        "  background-color: #1E1E1E;"
-        "  color: #F0F0F0;"
-        "  border: none;"
-        "  font-size: 16px;"
-        "}"
-        "QLabel {"
-        "  color: #F0F0F0;"
-        "  font-size: 16px;"
-        "  background: transparent;"
-        "}"
-        "QLineEdit {"
-        "  background-color: #232323;"
-        "  color: #F0F0F0;"
-        "  border: 1.5px solid #444;"
-        "  border-radius: 8px;"
-        "  padding: 10px 14px;"
-        "  font-size: 16px;"
-        "}"
-        "QLineEdit:focus {"
-        "  border: 1.5px solid #FF8C00;"
-        "  background: #232323;"
-        "}"
-        "QLineEdit::placeholder {"
-        "  color: #888888;"
-        "  font-style: italic;"
-        "}"
-        "QPushButton {"
-        "  background-color: #232323;"
-        "  color: #F0F0F0;"
-        "  border-radius: 10px;"
-        "  padding: 10px 20px;"
-        "  font-size: 16px;"
-        "  border: none;"
-        "}"
-        "QPushButton:hover {"
-        "  background-color: #333333;"
-        "}"
-        "QComboBox {"
-        "  background-color: #232323;"
-        "  color: #F0F0F0;"
-        "  border-radius: 8px;"
-        "  border: 1.5px solid #444;"
-        "  padding: 8px 14px;"
-        "  font-size: 16px;"
-        "}"
-        "QComboBox QAbstractItemView {"
-        "  background-color: #232323;"
-        "  color: #F0F0F0;"
-        "}"
-        "QProgressBar {"
-        "  background-color: #232323;"
-        "  color: #F0F0F0;"
-        "  border-radius: 4px;"
-        "}"
-        "QProgressBar::chunk {"
-        "  background-color: #FF8C00;"
-        "  border-radius: 4px;"
-        "}"
-    );
-    
+
+    // 顶部留白
+    mainLayout_->addStretch(1);
+
     // 创建滚动区域
     scrollArea_ = new QScrollArea(this);
     scrollArea_->setWidgetResizable(true);
     scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    
+    scrollArea_->setStyleSheet(
+        "QScrollBar:vertical {"
+        "  width: 8px;"
+        "  background: transparent;"
+        "  margin: 0px 0px 0px 0px;"
+        "  border-radius: 4px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "  background: #bdbdbd;"
+        "  min-height: 20px;"
+        "  border-radius: 4px;"
+        "}"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+        "  height: 0px;"
+        "}"
+    );
+
     // 内容容器
     contentWidget_ = new QWidget();
+    contentWidget_->setMaximumWidth(680); // 加宽内容卡片宽度
     QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget_);
     contentLayout->setSpacing(20);
     contentLayout->setContentsMargins(30, 30, 30, 30);
-    
-    // 创建各个配置区域
+    contentLayout->addStretch(1); // 顶部留白
     setupHeaderSection(contentLayout);
     setupAsrConfigSection(contentLayout);
     setupAboutSection(contentLayout);
-    
-    scrollArea_->setWidget(contentWidget_);
-    mainLayout_->addWidget(scrollArea_);
-    
-    // 底部按钮区域
+    contentLayout->addStretch(2); // 底部留白
+
+    // 居中内容卡片
+    QWidget* centerContainer = new QWidget();
+    QHBoxLayout* hCenterLayout = new QHBoxLayout(centerContainer);
+    hCenterLayout->addStretch(1);
+    hCenterLayout->addWidget(contentWidget_, 0, Qt::AlignCenter);
+    hCenterLayout->addStretch(1);
+    hCenterLayout->setContentsMargins(0, 0, 0, 0);
+    scrollArea_->setWidget(centerContainer);
+
+    mainLayout_->addWidget(scrollArea_, 10);
+    mainLayout_->addSpacing(20); // 内容与按钮区间距
+
+    // 底部按钮区域悬浮居中
     setupBottomSection();
-    
+    if (mainLayout_->count() > 0) {
+        QWidget* bottomFrame = qobject_cast<QWidget*>(mainLayout_->itemAt(mainLayout_->count() - 1)->widget());
+        if (bottomFrame) {
+            bottomFrame->setMaximumWidth(680);
+            bottomFrame->setMinimumWidth(680);
+            bottomFrame->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+            mainLayout_->setAlignment(bottomFrame, Qt::AlignHCenter);
+        }
+    }
+    mainLayout_->addStretch(2); // 底部留白
+
     // 状态区域
     setupStatusSection();
 }
@@ -174,7 +159,7 @@ void SystemConfigWindow::setupHeaderSection(QVBoxLayout* contentLayout) {
         "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
         "    stop:0 #FF8C00, stop:1 #FF6B35);"
         "  border-radius: 15px;"
-        "  padding: 20px;"
+        "  padding: 10px;"
         "}"
     );
     
@@ -215,7 +200,7 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
         "  background: white;"
         "  border: 1px solid #e1e5e9;"
         "  border-radius: 15px;"
-        "  padding: 25px;"
+        "  padding: 16px;"
         "}"
     );
     
@@ -254,7 +239,7 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     
     // 配置表单
     QGridLayout* formLayout = new QGridLayout();
-    formLayout->setSpacing(15);
+    formLayout->setSpacing(8);
     
     int row = 0;
     
@@ -271,12 +256,12 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     
     appIdEdit_ = new QLineEdit();
     appIdEdit_->setPlaceholderText("请输入您的应用ID");
-    appIdEdit_->setMinimumHeight(45);
+    appIdEdit_->setMinimumHeight(32);
     appIdEdit_->setStyleSheet(
         "QLineEdit {"
         "  border: 2px solid #e9ecef;"
         "  border-radius: 10px;"
-        "  padding: 12px 15px;"
+        "  padding: 6px 12px;"
         "  background: white;"
         "  font-size: 14px;"
         "  color: #495057;"
@@ -284,7 +269,6 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
         "QLineEdit:focus {"
         "  border-color: #FF8C00;"
         "  background: #fff8f0;"
-        "  box-shadow: 0 0 0 3px rgba(255, 140, 0, 0.1);"
         "}"
         "QLineEdit::placeholder {"
         "  color: #adb5bd;"
@@ -308,12 +292,12 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     accessTokenEdit_ = new QLineEdit();
     accessTokenEdit_->setPlaceholderText("请输入您的访问令牌");
     accessTokenEdit_->setEchoMode(QLineEdit::Password);
-    accessTokenEdit_->setMinimumHeight(45);
+    accessTokenEdit_->setMinimumHeight(32);
     accessTokenEdit_->setStyleSheet(
         "QLineEdit {"
         "  border: 2px solid #e9ecef;"
         "  border-radius: 10px;"
-        "  padding: 12px 15px;"
+        "  padding: 6px 12px;"
         "  background: white;"
         "  font-size: 14px;"
         "  color: #495057;"
@@ -321,7 +305,6 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
         "QLineEdit:focus {"
         "  border-color: #FF8C00;"
         "  background: #fff8f0;"
-        "  box-shadow: 0 0 0 3px rgba(255, 140, 0, 0.1);"
         "}"
         "QLineEdit::placeholder {"
         "  color: #adb5bd;"
@@ -345,7 +328,7 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     secretKeyEdit_ = new QLineEdit();
     secretKeyEdit_->setPlaceholderText("请输入您的密钥");
     secretKeyEdit_->setEchoMode(QLineEdit::Password);
-    secretKeyEdit_->setMinimumHeight(45);
+    secretKeyEdit_->setMinimumHeight(32);
     secretKeyEdit_->setStyleSheet(
         "QLineEdit {"
         "  border: 2px solid #e9ecef;"
@@ -358,7 +341,6 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
         "QLineEdit:focus {"
         "  border-color: #FF8C00;"
         "  background: #fff8f0;"
-        "  box-shadow: 0 0 0 3px rgba(255, 140, 0, 0.1);"
         "}"
         "QLineEdit::placeholder {"
         "  color: #adb5bd;"
@@ -371,7 +353,7 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     // 显示/隐藏密码按钮
     showPasswordBtn_ = new QPushButton("👁 显示密码");
     showPasswordBtn_->setMaximumWidth(140);
-    showPasswordBtn_->setMinimumHeight(40);
+    showPasswordBtn_->setMinimumHeight(32);
     showPasswordBtn_->setStyleSheet(
         "QPushButton {"
         "  background: #f8f9fa;"
@@ -402,6 +384,8 @@ void SystemConfigWindow::setupAsrConfigSection(QVBoxLayout* contentLayout) {
     
     groupLayout->addLayout(formLayout);
     contentLayout->addWidget(asrConfigGroup_);
+    // 添加卡片阴影特效
+    perfx::ui::ShadowEffect::applyShadow(asrConfigGroup_, 16, QColor(0,0,0,30), QPoint(0, 4));
 }
 
 void SystemConfigWindow::setupAboutSection(QVBoxLayout* contentLayout) {
@@ -435,6 +419,8 @@ void SystemConfigWindow::setupAboutSection(QVBoxLayout* contentLayout) {
     groupLayout->addWidget(aboutWidget_);
     
     contentLayout->addWidget(aboutGroup_);
+    // 添加卡片阴影特效
+    perfx::ui::ShadowEffect::applyShadow(aboutGroup_, 16, QColor(0,0,0,30), QPoint(0, 4));
 }
 
 void SystemConfigWindow::setupBottomSection() {
@@ -442,24 +428,35 @@ void SystemConfigWindow::setupBottomSection() {
     QFrame* bottomFrame = new QFrame();
     bottomFrame->setStyleSheet(
         "QFrame {"
-        "  background: white;"
-        "  border-top: 1px solid #e1e5e9;"
+        "  background: transparent;"
+        "  border: none;"
         "  padding: 20px;"
         "}"
     );
-    
+    // 宽度与内容区一致
+    bottomFrame->setMaximumWidth(680);
+    bottomFrame->setMinimumWidth(680);
+
     QVBoxLayout* bottomLayout = new QVBoxLayout(bottomFrame);
     bottomLayout->setSpacing(15);
-    
+
     // 主要操作按钮
     buttonLayout_ = new QHBoxLayout();
-    buttonLayout_->setSpacing(15);
-    buttonLayout_->addStretch();
+    
+    // 计算按钮间距：容器宽度680，4个按钮每个50px，左右留白各20px，剩余空间平均分配
+    // 总按钮宽度：4 * 50 = 200px
+    // 容器可用宽度：680 - 40(左右padding) = 640px
+    // 剩余空间：640 - 200 = 440px
+    // 间距：440 / 5 = 88px (4个按钮需要5个间隔)
+    int buttonSpacing = 88;
+    buttonLayout_->setSpacing(buttonSpacing);
+    buttonLayout_->addStretch();   // 左侧留白
 
     // 保存按钮
-    saveBtn_ = new QPushButton("💾 保存配置");
+    saveBtn_ = new QPushButton("保存配置");
     saveBtn_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
     saveBtn_->setMinimumHeight(45);
+    saveBtn_->setFixedWidth(50); // 设置固定宽度
     saveBtn_->setStyleSheet(
         "QPushButton {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -467,9 +464,9 @@ void SystemConfigWindow::setupBottomSection() {
         "  color: white;"
         "  border: none;"
         "  border-radius: 10px;"
-        "  padding: 12px 25px;"
+        "  padding: 12px 8px;"
         "  font-weight: bold;"
-        "  font-size: 14px;"
+        "  font-size: 12px;"
         "}"
         "QPushButton:hover {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -487,9 +484,10 @@ void SystemConfigWindow::setupBottomSection() {
     buttonLayout_->addWidget(saveBtn_);
 
     // 测试按钮
-    testBtn_ = new QPushButton("🔍 测试连接");
+    testBtn_ = new QPushButton("测试连接");
     testBtn_->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
     testBtn_->setMinimumHeight(45);
+    testBtn_->setFixedWidth(50); // 修复：正确设置testBtn_的固定宽度
     testBtn_->setStyleSheet(
         "QPushButton {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -497,9 +495,9 @@ void SystemConfigWindow::setupBottomSection() {
         "  color: white;"
         "  border: none;"
         "  border-radius: 10px;"
-        "  padding: 12px 25px;"
+        "  padding: 12px 8px;"
         "  font-weight: bold;"
-        "  font-size: 14px;"
+        "  font-size: 12px;"
         "}"
         "QPushButton:hover {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -517,9 +515,10 @@ void SystemConfigWindow::setupBottomSection() {
     buttonLayout_->addWidget(testBtn_);
 
     // 配置指南按钮
-    guideBtn_ = new QPushButton("📖 配置指南");
+    guideBtn_ = new QPushButton("配置指南");
     guideBtn_->setIcon(style()->standardIcon(QStyle::SP_MessageBoxInformation));
     guideBtn_->setMinimumHeight(45);
+    guideBtn_->setFixedWidth(50); // 修复：正确设置guideBtn_的固定宽度
     guideBtn_->setStyleSheet(
         "QPushButton {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -527,9 +526,9 @@ void SystemConfigWindow::setupBottomSection() {
         "  color: white;"
         "  border: none;"
         "  border-radius: 10px;"
-        "  padding: 12px 25px;"
+        "  padding: 12px 8px;"
         "  font-weight: bold;"
-        "  font-size: 14px;"
+        "  font-size: 12px;"
         "}"
         "QPushButton:hover {"
         "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -545,26 +544,22 @@ void SystemConfigWindow::setupBottomSection() {
         "}"
     );
     buttonLayout_->addWidget(guideBtn_);
+    guideBtn_->setToolTip("点击查看详细配置说明和API密钥申请指引");
 
-    buttonLayout_->addStretch();
-    bottomLayout->addLayout(buttonLayout_);
-    
     // 返回按钮
-    QHBoxLayout* backLayout = new QHBoxLayout();
-    backLayout->addStretch();
-
-    backBtn_ = new QPushButton("← 返回主菜单");
+    backBtn_ = new QPushButton("返回主菜单");
     backBtn_->setIcon(style()->standardIcon(QStyle::SP_ArrowLeft));
     backBtn_->setMinimumHeight(40);
+    backBtn_->setFixedWidth(50); // 修复：正确设置backBtn_的固定宽度
     backBtn_->setStyleSheet(
         "QPushButton {"
         "  background: #f8f9fa;"
         "  color: #6c757d;"
         "  border: 1px solid #dee2e6;"
         "  border-radius: 8px;"
-        "  padding: 10px 20px;"
+        "  padding: 10px 8px;"
         "  font-weight: 500;"
-        "  font-size: 13px;"
+        "  font-size: 11px;"
         "}"
         "QPushButton:hover {"
         "  background: #e9ecef;"
@@ -575,10 +570,10 @@ void SystemConfigWindow::setupBottomSection() {
         "  background: #dee2e6;"
         "}"
     );
-    backLayout->addWidget(backBtn_);
-    backLayout->addStretch();
-    
-    bottomLayout->addLayout(backLayout);
+    buttonLayout_->addWidget(backBtn_);
+
+    buttonLayout_->addStretch();   // 右侧留白
+    bottomLayout->addLayout(buttonLayout_);
     mainLayout_->addWidget(bottomFrame);
 
     // 连接信号
@@ -745,7 +740,7 @@ void SystemConfigWindow::onSaveConfig() {
             
             // 设置配置
             client.setAppId(config.appId);
-            client.setAccessToken(config.accessToken);
+            client.setToken(config.accessToken);
             client.setSecretKey(config.secretKey);
             
             // 尝试连接（设置超时）
@@ -789,8 +784,8 @@ void SystemConfigWindow::onTestConnection() {
     std::cout << "[ASR-CRED] 开始测试连接..." << std::endl;
     std::cout << "[ASR-CRED] 测试配置:";
     std::cout << "  - App ID: " << config.appId << std::endl;
-    std::cout << "  - Access Token: " << config.accessToken << std::endl;
-    std::cout << "  - Secret Key: " << config.secretKey << std::endl;
+    std::cout << "  - Access Token: " << Asr::maskSensitiveInfo(config.accessToken, 4, 4) << std::endl;
+    std::cout << "  - Secret Key: " << Asr::maskSensitiveInfo(config.secretKey, 4, 4) << std::endl;
     
     // 禁用测试按钮，显示加载状态
     testBtn_->setEnabled(false);
@@ -836,7 +831,7 @@ void SystemConfigWindow::onTestConnection() {
             
             // 设置配置
             client.setAppId(config.appId);
-            client.setAccessToken(config.accessToken);
+            client.setToken(config.accessToken);
             client.setSecretKey(config.secretKey);
             
             // 尝试连接（设置超时）
@@ -933,8 +928,8 @@ bool SystemConfigWindow::testAsrConnection() {
     
     qDebug() << "[testAsrConnection] Starting ASR connection test...";
     qDebug() << "[testAsrConnection] App ID:" << QString::fromStdString(config.appId);
-    qDebug() << "[testAsrConnection] Access Token:" << QString::fromStdString(config.accessToken).left(4) + "****" + QString::fromStdString(config.accessToken).right(4);
-    qDebug() << "[testAsrConnection] Secret Key:" << QString::fromStdString(config.secretKey).left(4) + "****" + QString::fromStdString(config.secretKey).right(4);
+    qDebug() << "[testAsrConnection] Access Token:" << QString::fromStdString(Asr::maskSensitiveInfo(config.accessToken, 4, 4));
+    qDebug() << "[testAsrConnection] Secret Key:" << QString::fromStdString(Asr::maskSensitiveInfo(config.secretKey, 4, 4));
     
     // 调用ASR管理器的测试接口
     bool result = Asr::AsrManager().testConnection(config.appId, config.accessToken, config.secretKey);
@@ -1023,6 +1018,21 @@ void SystemConfigWindow::showConfigGuide() {
         "- 软件使用问题，请查看软件文档或联系开发者";
     
     QMessageBox::information(this, "配置指南", guide);
+}
+
+bool SystemConfigWindow::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == saveBtn_ || obj == testBtn_ || obj == guideBtn_) {
+        if (event->type() == QEvent::Enter) {
+            perfx::ui::UIEffectsUtils::applyHoverEffect(static_cast<QWidget*>(obj), QPoint(0, -2), QSize(6, 6), 120);
+        } else if (event->type() == QEvent::Leave) {
+            perfx::ui::UIEffectsUtils::applyHoverEffect(static_cast<QWidget*>(obj), QPoint(0, 0), QSize(0, 0), 120);
+        } else if (event->type() == QEvent::MouseButtonPress) {
+            perfx::ui::UIEffectsUtils::applyClickEffect(static_cast<QWidget*>(obj), QPoint(0, 2), QSize(-4, -4), 80);
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            perfx::ui::UIEffectsUtils::applyHoverEffect(static_cast<QWidget*>(obj), QPoint(0, -2), QSize(6, 6), 120);
+        }
+    }
+    return QWidget::eventFilter(obj, event);
 }
 
 } // namespace perfx

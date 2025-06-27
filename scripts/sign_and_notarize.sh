@@ -278,7 +278,7 @@ main() {
     fi
     
     # 创建签名的DMG
-    local dmg_name="build/PerfxAgent-ASR-1.6.2-Signed.dmg"
+    local dmg_name="build/PerfxAgent-ASR-1.7.0-Signed.dmg"
     if ! create_signed_dmg "$app_path" "$dmg_name" "$identity"; then
         log_error "DMG创建失败"
         exit 1

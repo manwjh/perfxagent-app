@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include "asr/secure_key_manager.h"
 
 namespace perfx {
 namespace ui {
@@ -140,113 +141,23 @@ ConfigManager::~ConfigManager() {
 
 AsrConfig ConfigManager::loadConfig() {
     // ============================================================================
-    // 配置加载 - 支持多种配置方式
+    // 配置加载 - 重构后的简化版本
     // ============================================================================
-    // 配置优先级：
-    // 1. 环境变量 ASR_* (用户自定义，优先级最高)
-    // 2. 环境变量 VOLC_* (用户自定义，兼容性支持)
-    // 3. 界面配置 (用户通过界面设置)
-    // 4. 混淆配置 (厂商提供，体验模式)
+    // 使用ConfigLoader按优先级加载配置
     // ============================================================================
     
-    qDebug() << "==========================================";
-    qDebug() << "[ASR-CRED] 🔍 开始加载ASR配置...";
-    qDebug() << "[ASR-CRED] 📋 配置优先级:";
-    qDebug() << "   1. 环境变量 ASR_* (用户自定义，优先级最高)";
-    qDebug() << "   2. 界面配置 (用户通过界面设置)";
-    qDebug() << "   3. 混淆配置 (厂商提供，体验模式)";
-    qDebug() << "==========================================";
+    auto [config, source] = ConfigLoader::loadConfigWithPriority(configFilePath_);
     
-    // 第一优先级：环境变量 ASR_*
-    const char* envAppId = std::getenv("ASR_APP_ID");
-    const char* envAccessToken = std::getenv("ASR_ACCESS_TOKEN");
-    const char* envSecretKey = std::getenv("ASR_SECRET_KEY");
+    // 更新当前配置状态
+    currentConfig_ = config;
+    currentConfigSource_ = source;
+    configLoaded_ = true;
     
-    if (envAppId && envAccessToken) {
-        qDebug() << "[ASR-CRED] 🎯 使用环境变量配置 (ASR_* 前缀)";
-        qDebug() << "   💡 这是用户自定义的环境变量配置，优先级最高";
-        
-        AsrConfig config;
-        config.appId = envAppId;
-        config.accessToken = envAccessToken;
-        config.secretKey = envSecretKey ? envSecretKey : "";
-        config.isValid = true;
-        config.configSource = "environment_variables";
-        
-        qDebug() << "[ASR-CRED] ✅ 环境变量配置加载成功";
-        qDebug() << "   - App ID: " << QString::fromStdString(config.appId);
-        qDebug() << "   - Access Token: " << QString::fromStdString(config.accessToken);
-        qDebug() << "   - Secret Key: " << QString::fromStdString(config.secretKey);
-        
-        return config;
-    }
-    
-    // 第二优先级：环境变量 VOLC_* (兼容性支持)
-    const char* volcAppId = std::getenv("VOLC_APP_ID");
-    const char* volcAccessToken = std::getenv("VOLC_ACCESS_TOKEN");
-    const char* volcSecretKey = std::getenv("VOLC_SECRET_KEY");
-    
-    if (volcAppId && volcAccessToken) {
-        qDebug() << "[ASR-CRED] 🎯 使用环境变量配置 (VOLC_* 前缀)";
-        qDebug() << "   💡 这是兼容性环境变量配置";
-        
-        AsrConfig config;
-        config.appId = volcAppId;
-        config.accessToken = volcAccessToken;
-        config.secretKey = volcSecretKey ? volcSecretKey : "";
-        config.isValid = true;
-        config.configSource = "environment_variables";
-        
-        qDebug() << "[ASR-CRED] ✅ VOLC环境变量配置加载成功";
-        qDebug() << "   - App ID: " << QString::fromStdString(config.appId);
-        qDebug() << "   - Access Token: " << QString::fromStdString(config.accessToken);
-        qDebug() << "   - Secret Key: " << QString::fromStdString(config.secretKey);
-        
-        return config;
-    }
-    
-    // 第三优先级：界面配置
-    QSettings settings;
-    QString savedAppId = settings.value("asr/appId").toString();
-    QString savedAccessToken = settings.value("asr/accessToken").toString();
-    QString savedSecretKey = settings.value("asr/secretKey").toString();
-    
-    if (!savedAppId.isEmpty() && !savedAccessToken.isEmpty()) {
-        qDebug() << "[ASR-CRED] 🎯 使用界面配置";
-        qDebug() << "   💡 这是通过系统配置界面保存的配置";
-        
-        AsrConfig config;
-        config.appId = savedAppId.toStdString();
-        config.accessToken = savedAccessToken.toStdString();
-        config.secretKey = savedSecretKey.toStdString();
-        config.isValid = true;
-        config.configSource = "user_config";
-        
-        qDebug() << "[ASR-CRED] ✅ 界面配置加载成功";
-        qDebug() << "   - App ID: " << savedAppId;
-        qDebug() << "   - Access Token: " << savedAccessToken;
-        qDebug() << "   - Secret Key: " << savedSecretKey;
-        
-        return config;
-    }
-    
-    // 第四优先级：混淆配置（体验模式）
-    qDebug() << "[ASR-CRED] 🎯 使用体验模式配置";
-    qDebug() << "   💡 这是厂商提供的混淆配置，用于体验功能";
-    qDebug() << "   💡 建议设置环境变量以获得完整功能";
-    
-    AsrConfig config;
-    config.appId = SecureKeyManager::getAppId();
-    config.accessToken = SecureKeyManager::getAccessToken();
-    config.secretKey = SecureKeyManager::getSecretKey();
-    config.isValid = true;
-    config.configSource = "trial_mode";
-    
-    qDebug() << "[ASR-CRED] ✅ 体验模式配置加载成功";
-    qDebug() << "   - App ID: " << QString::fromStdString(config.appId);
-    qDebug() << "   - Access Token: " << QString::fromStdString(config.accessToken);
-    qDebug() << "   - Secret Key: " << QString::fromStdString(config.secretKey);
-    qDebug() << "[ASR-CRED] ⚠️  体验模式：请确保使用次数未超过限制";
+    // 输出配置加载结果（可选，用于调试）
+    qDebug() << "[ASR-CRED] 配置加载完成:";
+    qDebug() << "   - 来源:" << QString::fromStdString(config.configSource);
+    qDebug() << "   - App ID:" << QString::fromStdString(config.appId);
+    qDebug() << "   - 有效:" << (config.isValid ? "是" : "否");
     
     return config;
 }
@@ -548,37 +459,7 @@ bool ConfigManager::saveToFile(const AsrConfig& config) {
 }
 
 bool ConfigManager::validateConfig(const AsrConfig& config) {
-    if (config.appId.empty()) {
-        qWarning() << "应用ID不能为空";
-        return false;
-    }
-    
-    if (config.accessToken.empty()) {
-        qWarning() << "访问令牌不能为空";
-        return false;
-    }
-    
-    if (config.sampleRate < 8000 || config.sampleRate > 48000) {
-        qWarning() << "采样率必须在8000-48000之间";
-        return false;
-    }
-    
-    if (config.bits != 8 && config.bits != 16 && config.bits != 24 && config.bits != 32) {
-        qWarning() << "位深度必须是8、16、24或32";
-        return false;
-    }
-    
-    if (config.channels < 1 || config.channels > 2) {
-        qWarning() << "声道数必须是1或2";
-        return false;
-    }
-    
-    if (config.segDuration < 50 || config.segDuration > 1000) {
-        qWarning() << "分段时长必须在50-1000ms之间";
-        return false;
-    }
-    
-    return true;
+    return ConfigValidator::validateAsrConfig(config);
 }
 
 bool ConfigManager::ensureConfigDirectory() {

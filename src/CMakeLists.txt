@@ -101,6 +101,36 @@ target_link_libraries(perfx_asr_manager PUBLIC
     nlohmann_json::nlohmann_json
 )
 
+# 添加 UI 特效管理器库
+add_library(perfx_ui_effects STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_effects_manager.cpp
+    ${CMAKE_SOURCE_DIR}/include/ui/ui_effects_manager.h
+)
+
+# 禁用AUTOUIC，因为我们不需要UI文件
+set_target_properties(perfx_ui_effects PROPERTIES
+    AUTOUIC OFF
+    AUTOMOC_MOC_OPTIONS "-I${CMAKE_SOURCE_DIR}/include"
+)
+
+target_include_directories(perfx_ui_effects PUBLIC
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/perfx_ui_effects_autogen/include
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Gui_INCLUDE_DIRS}
+    ${Qt6Widgets_INCLUDE_DIRS}
+)
+
+target_link_libraries(perfx_ui_effects PUBLIC
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+
 # 添加Qt资源文件
 qt6_add_resources(APP_RESOURCES "${CMAKE_SOURCE_DIR}/resources/resources.qrc")
 
@@ -115,6 +145,8 @@ set(HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/global_state.h
     ${CMAKE_SOURCE_DIR}/include/logic/realtime_transcription_controller.h
     ${CMAKE_SOURCE_DIR}/include/ui/app_icon_button.h
+    ${CMAKE_SOURCE_DIR}/include/ui/ui_effects_manager.h
+    ${CMAKE_SOURCE_DIR}/include/ui/input_method_manager.h
 )
 
 # 确保 icon 文件被加到 bundle
@@ -127,9 +159,13 @@ set(SOURCES
     ui/system_config_window.cpp
     ui/about_project_widget.cpp
     ui/config_manager.cpp
+    ui/config_loader.cpp
+    ui/config_validator.cpp
     ui/global_state.cpp
     logic/realtime_transcription_controller.cpp
     ui/app_icon_button.cpp
+    ui/ui_effects_manager.cpp
+    ui/input_method_manager.cpp
     ${HEADERS}
     ${APP_ICON_MACOS}
 )
@@ -139,6 +175,9 @@ add_executable(perfxagent-app
     ${SOURCES}
     ${APP_RESOURCES}
 )
+
+# 禁用AUTOUIC，防止Qt UIC误判
+set_target_properties(perfxagent-app PROPERTIES AUTOUIC OFF)
 
 # 设置主应用程序的包含目录
 target_include_directories(perfxagent-app PRIVATE
@@ -167,6 +206,7 @@ target_link_libraries(perfxagent-app PRIVATE
     perfx_audio
     perfx_asr_client
     perfx_asr_manager
+    perfx_ui_effects
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

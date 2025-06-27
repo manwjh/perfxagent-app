@@ -123,7 +123,7 @@ private:
     
     std::unique_ptr<audio::FileImporter> fileImporter_;
     std::unique_ptr<audio::AudioConverter> audioConverter_;
-    std::unique_ptr<Asr::AsrManager> asrManager_;
+    Asr::AsrManager* asrManager_;  // 使用单例模式，改为普通指针
     std::unique_ptr<EnhancedAsrCallback> asrCallback_;
     std::vector<std::string> inputFiles_;
     std::vector<std::string> workFiles_;  // 工作文件（转换后的WAV文件）

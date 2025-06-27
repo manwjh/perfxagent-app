@@ -209,6 +209,7 @@ public:
             stream_.reset(rawStream);
             currentConfig_ = config;
             currentDevice_ = device;
+            isOpen_ = true;  // 标记设备为已打开状态
             return true;
         } catch (const std::exception& e) {
             lastError_ = e.what();
@@ -253,6 +254,7 @@ public:
 
         stream_.reset(rawStream);
         currentConfig_ = config;
+        isOpen_ = true;  // 标记设备为已打开状态
         return true;
     }
 

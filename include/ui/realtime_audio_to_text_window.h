@@ -75,6 +75,9 @@ private:
 
     void updateRecordingButtons();
     void updateStatusBar(const QString& message);
+    void updateStatusBarSuccess(const QString& message);
+    void updateStatusBarWarning(const QString& message);
+    void updateStatusBarError(const QString& message);
     void clearTranscription();
     QIcon createRedDotIcon();
 

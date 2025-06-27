@@ -7,6 +7,7 @@
 #include "ui/app_icon_button.h"
 #include "ui/config_manager.h"
 #include "ui/global_state.h"
+#include "asr/secure_key_manager.h"
 #include <QVBoxLayout>
 #include <QPushButton>
 #include <QWidget>
@@ -25,6 +26,7 @@
 #include <QIcon>
 #include <QFile>
 #include <QPixmap>
+#include "ui/ui_effects_manager.h"
 
 namespace perfx {
 namespace ui {
@@ -242,8 +244,8 @@ void MainWindow::loadAsrConfig() {
                 qDebug() << "[loadAsrConfig] 📊 配置加载结果:";
                 qDebug() << "   - 配置来源: " << QString::fromStdString(config.configSource);
                 qDebug() << "   - App ID: " << QString::fromStdString(config.appId);
-                qDebug() << "   - Access Token: " << QString::fromStdString(config.accessToken);
-                qDebug() << "   - Secret Key: " << QString::fromStdString(config.secretKey);
+                qDebug() << "   - Access Token: " << QString::fromStdString(Asr::maskSensitiveInfo(config.accessToken, 4, 4));
+                qDebug() << "   - Secret Key: " << QString::fromStdString(Asr::maskSensitiveInfo(config.secretKey, 4, 4));
                 qDebug() << "   - 配置有效: " << (config.isValid ? "是" : "否");
                 qDebug() << "   - 配置已加载: " << (self->asrConfigLoaded_ ? "是" : "否");
                 qDebug() << "   - 配置验证: " << (self->asrConfigValid_ ? "通过" : "失败");
@@ -347,7 +349,7 @@ void MainWindow::createMainMenuPage() {
     iconLayout->setContentsMargins(0, 0, 0, 0);
 
     // 文件转文字按钮
-    QPushButton* fileBtn = new QPushButton(mainMenuWidget_);
+    perfx::ui::AnimatedButton* fileBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     fileBtn->setIcon(QIcon(":/icons/audio_file.png"));
     fileBtn->setIconSize(QSize(96, 96));
     fileBtn->setFixedSize(144, 144);
@@ -370,7 +372,6 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.1),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.4);"
-        "  transform: translateY(-2px);"
         "}"
         "#fileBtn:pressed {"
         "  background: qradialgradient(cx:0.5, cy:0.5, radius:0.8,"
@@ -378,22 +379,18 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.15),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.6);"
-        "  transform: translateY(1px);"
         "}"
     );
-    
-    // 添加阴影效果
     QGraphicsDropShadowEffect* fileShadow = new QGraphicsDropShadowEffect();
     fileShadow->setBlurRadius(15);
     fileShadow->setColor(QColor(0, 0, 0, 60));
     fileShadow->setOffset(0, 4);
     fileBtn->setGraphicsEffect(fileShadow);
-    
     connect(fileBtn, &QPushButton::clicked, this, &MainWindow::switchToAudioToText);
     iconLayout->addWidget(fileBtn, 0, Qt::AlignHCenter);
 
     // 实时录音按钮
-    QPushButton* micBtn = new QPushButton(mainMenuWidget_);
+    perfx::ui::AnimatedButton* micBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     micBtn->setIcon(QIcon(":/icons/realtime_ai_audio.png"));
     micBtn->setIconSize(QSize(96, 96));
     micBtn->setFixedSize(144, 144);
@@ -416,7 +413,6 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.1),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.4);"
-        "  transform: translateY(-2px);"
         "}"
         "#micBtn:pressed {"
         "  background: qradialgradient(cx:0.5, cy:0.5, radius:0.8,"
@@ -424,22 +420,18 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.15),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.6);"
-        "  transform: translateY(1px);"
         "}"
     );
-    
-    // 添加阴影效果
     QGraphicsDropShadowEffect* micShadow = new QGraphicsDropShadowEffect();
     micShadow->setBlurRadius(15);
     micShadow->setColor(QColor(0, 0, 0, 60));
     micShadow->setOffset(0, 4);
     micBtn->setGraphicsEffect(micShadow);
-    
     connect(micBtn, &QPushButton::clicked, this, &MainWindow::switchToRealtimeAudioToText);
     iconLayout->addWidget(micBtn, 0, Qt::AlignHCenter);
 
     // 设置按钮
-    QPushButton* settingsBtn = new QPushButton(mainMenuWidget_);
+    perfx::ui::AnimatedButton* settingsBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     settingsBtn->setIcon(QIcon(":/icons/settging_asr.png"));
     settingsBtn->setIconSize(QSize(96, 96));
     settingsBtn->setFixedSize(144, 144);
@@ -462,7 +454,6 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.1),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.4);"
-        "  transform: translateY(-2px);"
         "}"
         "#settingsBtn:pressed {"
         "  background: qradialgradient(cx:0.5, cy:0.5, radius:0.8,"
@@ -470,17 +461,13 @@ void MainWindow::createMainMenuPage() {
         "    stop:0.7 rgba(255, 255, 255, 0.15),"
         "    stop:1 rgba(255, 255, 255, 0));"
         "  border: 2px solid rgba(255, 255, 255, 0.6);"
-        "  transform: translateY(1px);"
         "}"
     );
-    
-    // 添加阴影效果
     QGraphicsDropShadowEffect* settingsShadow = new QGraphicsDropShadowEffect();
     settingsShadow->setBlurRadius(15);
     settingsShadow->setColor(QColor(0, 0, 0, 60));
     settingsShadow->setOffset(0, 4);
     settingsBtn->setGraphicsEffect(settingsShadow);
-    
     connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::switchToSystemConfig);
     iconLayout->addWidget(settingsBtn, 0, Qt::AlignHCenter);
 

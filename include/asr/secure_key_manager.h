@@ -6,6 +6,15 @@
 namespace Asr {
 
 /**
+ * @brief 敏感信息隐码处理函数 (std::string版本)
+ * @param input 需要处理的字符串
+ * @param visibleStart 开头可见字符数
+ * @param visibleEnd 结尾可见字符数
+ * @return 处理后的字符串，中间部分用*替换
+ */
+std::string maskSensitiveInfo(const std::string& input, int visibleStart = 4, int visibleEnd = 4);
+
+/**
  * @brief 安全的密钥管理器
  * 
  * 使用多层混淆和加密技术保护API密钥

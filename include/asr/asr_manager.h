@@ -33,6 +33,7 @@
 #include <filesystem>
 #include "asr/asr_client.h"
 #include "asr/asr_debug_config.h"
+#include "secure_key_manager.h"     //仅服务于LOG打印信息的隐码
 
 namespace Asr {
 
@@ -279,9 +280,16 @@ struct AudioFileInfo {
  * 提供统一的 ASR 接口，管理多种 ASR 客户端实现
  * 支持配置管理、连接控制、音频识别等功能
  * 新增：连接时间统计和持久化功能
+ * 新增：单例模式支持，确保全局只有一个实例
  */
 class AsrManager : public AsrCallback {
 public:
+    // ============================================================================
+    // 单例模式
+    // ============================================================================
+    static AsrManager& instance();
+    static void destroyInstance();
+    
     // ============================================================================
     // 构造和析构
     // ============================================================================
