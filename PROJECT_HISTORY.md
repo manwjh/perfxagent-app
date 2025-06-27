@@ -21,14 +21,17 @@
 链接：./PROJECT_HISTORY(5)_Accurately%20fixing%20bugs.md
 摘要：记录了作者使用AI Coding进行精确修复bug和优化用户体验的项目开发笔记，记录了作者在2025年6月23日至24日期间，通过"精确打击"策略系统性地修复软件问题和完善用户体验的开发过程。主要成果包括修复了流式文本显示重复问题、解决了双重保存对话框问题、优化了音频设备断开检测机制、实现了统一的单界面布局设计，以及完善了实时语音转写字幕的分行显示逻辑。开发过程中采用了"泛问题→AI分析→精准修复"的工作模式，通过最小侵入性修改原则避免了代码扩散，最终实现了流畅的字幕同步显示效果，为项目建立了稳定的用户体验和可靠的错误处理机制。
 
-## PROJECT_HISTORY(6)_ installation package.md
-链接：./PROJECT_HISTORY(6)_%20installation%20package.md
+## PROJECT_HISTORY(6)_installation package.md
+链接：./PROJECT_HISTORY(6)_installation%20package.md
 摘要：记录了作者使用AI Coding进行项目打包发布和资源管理的开发笔记，记录了作者在2025年6月24日期间，为PerfxAgent-ASR项目建立完整的macOS安装包打包系统和图标资源管理体系的开发过程。主要成果包括清理了CMakeLists.txt中的跨平台代码、建立了完整的图标生成体系（支持多种尺寸的PNG、ICO、ICNS格式）、实现了基于CPack的macOS DMG/TGZ安装包自动构建、修复了版本号不一致问题，以及完善了项目的文档体系。开发过程中遇到了依赖库名称不匹配、版本号冲突等技术挑战，通过AI辅助最终成功建立了完整的项目发布流程，为项目建立了专业级的打包发布能力和资源管理体系。
 
-## PROJECT_HISTORY(7)_ installation package.md
-链接：./PROJECT_HISTORY(7)_%20installation%20package.md
+## PROJECT_HISTORY(7)_MacOS and Cross Platfform.md
+链接：./ROJECT_HISTORY(7)_MacOS%20and%20Cross%20Platfform.md
 摘要：成功完成 macOS 应用程序的 Developer ID 签名和打包，解决了 OpenCV 残留依赖库问题，这个是造成本季进度不如预期的重要原因之一。
 
+## PROJECT_HISTORY(8)_ Clear ALL.md
+链接：./PROJECT_HISTORY(8)_Clear%20ALL.md
+摘要：清理bug，清理不合理的地方，清理架构荣誉，清理不归一，清理安全等问题
 
 ## 结束语
 （暂无）
