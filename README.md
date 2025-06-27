@@ -5,6 +5,7 @@
 ![PerfxAgent-ASR Logo](resources/icons/PerfxAgent-ASR.png)
 
 **一个基于Qt6的跨平台桌面应用程序，专注于音频处理、实时语音识别(ASR)和智能转录功能**
+<img width="691" alt="image" src="https://github.com/user-attachments/assets/b8fccbff-20bf-4ab6-ab02-595167ea795c" />
 
 **A Qt6-based cross-platform desktop application focused on audio processing, real-time speech recognition (ASR), and intelligent transcription features**
 
