@@ -27,5 +27,6 @@ https://www.bilibili.com/video/BV1o8KizFEvF/?vd_source=4ab49101e323bf3a37e7b8181
 - 不再在本地编写PROJECT HISTORY，不好插图，不好预览。文字多了增加AI工作难度。后续在线上直接写✍️。
 
 - 系统互锁的问题。
+- 完全不熟悉QT设计的AI，该调啥参数呀。  to_ai>>帮我给system_config_window界面设计，加详细注释，布局和样式参数等。
 
 
