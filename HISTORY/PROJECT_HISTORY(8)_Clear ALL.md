@@ -28,7 +28,7 @@ https://www.bilibili.com/video/BV1o8KizFEvF/?vd_source=4ab49101e323bf3a37e7b8181
 
 - 系统互锁的问题。
 - 完全不熟悉QT设计的AI，该调啥参数呀。  to_ai>>阅读该系统设置界面的cpp，涉及到UI界面的代码，全部加上注释，我不懂怎么用。   在代码行后加"//注释“。
-- UI的设计无法精确修改，只能改到这种状况了。希望有缘人能帮忙改改。
+- 系统设置界面，凑合一下（UI的设计无法精确修改，只能改到这种状况了。希望有缘人能帮忙改改。）
 <img width="523" alt="image" src="https://github.com/user-attachments/assets/c309adf3-1e04-4c7e-9070-2104cc361035" />
 
 
