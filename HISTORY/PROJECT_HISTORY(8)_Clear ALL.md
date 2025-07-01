@@ -31,6 +31,8 @@ https://www.bilibili.com/video/BV1o8KizFEvF/?vd_source=4ab49101e323bf3a37e7b8181
 - 系统设置界面，凑合一下（UI的设计无法精确修改，只能改到这种状况了。希望有缘人能帮忙改改。）
 <img width="523" alt="image" src="https://github.com/user-attachments/assets/c309adf3-1e04-4c7e-9070-2104cc361035" />
 
+- 阅读asr部分的底层代码，清理掉不必要的东西，看明白关键的东西，将一些函数移到更管理模块中，例如凭证。
+
 
 
 
