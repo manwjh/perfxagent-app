@@ -34,7 +34,7 @@ AboutProjectWidget::~AboutProjectWidget() = default;
 
 void AboutProjectWidget::setupUI() {
     mainLayout_ = new QVBoxLayout(this);
-    mainLayout_->setSpacing(20);
+    mainLayout_->setSpacing(10);
     mainLayout_->setContentsMargins(0, 0, 0, 0);
     
     // 项目信息组
@@ -49,15 +49,15 @@ void AboutProjectWidget::setupUI() {
     );
     
     QVBoxLayout* projectLayout = new QVBoxLayout(projectInfoGroup_);
-    projectLayout->setSpacing(15);
-    projectLayout->setContentsMargins(20, 20, 20, 20);
+    projectLayout->setSpacing(10);
+    projectLayout->setContentsMargins(8, 8, 8, 8);
     
     // 软件名称
     softwareNameLabel_ = new QLabel();
-    softwareNameLabel_->setAlignment(Qt::AlignCenter);
+    softwareNameLabel_->setAlignment(Qt::AlignLeft);
     softwareNameLabel_->setStyleSheet(
         "QLabel {"
-        "  color: white;"
+        "  color: #222;"
         "  font-size: 18px;"
         "  font-weight: bold;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
@@ -70,11 +70,11 @@ void AboutProjectWidget::setupUI() {
     // 软件介绍
     descriptionLabel_ = new QLabel();
     descriptionLabel_->setWordWrap(true);
-    descriptionLabel_->setAlignment(Qt::AlignCenter);
+    descriptionLabel_->setAlignment(Qt::AlignLeft);
     descriptionLabel_->setStyleSheet(
         "QLabel {"
-        "  color: rgba(255, 255, 255, 0.8);"
-        "  font-size: 13px;"
+        "  color: #222;"
+        "  font-size: 14px;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
         "  line-height: 1.4;"
         "  background: transparent;"
@@ -86,11 +86,11 @@ void AboutProjectWidget::setupUI() {
     
     // 版本信息
     versionLabel_ = new QLabel();
-    versionLabel_->setAlignment(Qt::AlignCenter);
+    versionLabel_->setAlignment(Qt::AlignLeft);
     versionLabel_->setStyleSheet(
         "QLabel {"
-        "  color: rgba(255, 255, 255, 0.7);"
-        "  font-size: 12px;"
+        "  color: #222;"
+        "  font-size: 14px;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
         "  background: transparent;"
         "  border: none;"
@@ -119,25 +119,25 @@ void AboutProjectWidget::setupUI() {
     QLabel* linksTitle = new QLabel("🔗 联系方式");
     linksTitle->setStyleSheet(
         "QLabel {"
-        "  color: white;"
-        "  font-size: 14px;"
+        "  color: #222;"
+        "  font-size: 18px;"
         "  font-weight: bold;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
         "  background: transparent;"
         "  border: none;"
         "}"
     );
-    linksTitle->setAlignment(Qt::AlignCenter);
+    linksTitle->setAlignment(Qt::AlignLeft);
     linksLayout->addWidget(linksTitle);
     
     // GitHub链接
     githubLinkLabel_ = new QLabel();
-    githubLinkLabel_->setAlignment(Qt::AlignCenter);
+    githubLinkLabel_->setAlignment(Qt::AlignLeft);
     githubLinkLabel_->setCursor(Qt::PointingHandCursor);
     githubLinkLabel_->setStyleSheet(
         "QLabel {"
         "  color: #58a6ff;"
-        "  font-size: 12px;"
+        "  font-size: 14px;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
         "  background: transparent;"
         "  border: none;"
@@ -153,12 +153,12 @@ void AboutProjectWidget::setupUI() {
     
     // 邮箱链接
     emailLinkLabel_ = new QLabel();
-    emailLinkLabel_->setAlignment(Qt::AlignCenter);
+    emailLinkLabel_->setAlignment(Qt::AlignLeft);
     emailLinkLabel_->setCursor(Qt::PointingHandCursor);
     emailLinkLabel_->setStyleSheet(
         "QLabel {"
         "  color: #58a6ff;"
-        "  font-size: 12px;"
+        "  font-size: 14px;"
         "  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;"
         "  background: transparent;"
         "  border: none;"

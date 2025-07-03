@@ -50,7 +50,6 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::setupUi() {
-    qDebug() << "[setupUi] called";
     setWindowTitle("PerfxAgent - AI音频应用");
     resize(450, 900); // 增加窗口大小以适应新设计
 
@@ -297,9 +296,7 @@ void MainWindow::loadAsrConfig() {
 }
 
 void MainWindow::createMainMenuPage() {
-    qDebug() << "[createMainMenuPage] called";
     if (mainMenuWidget_) {
-        qDebug() << "[createMainMenuPage] mainMenuWidget_ already exists, skipping creation.";
         return;
     }
     
@@ -351,8 +348,8 @@ void MainWindow::createMainMenuPage() {
     // 文件转文字按钮
     perfx::ui::AnimatedButton* fileBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     fileBtn->setIcon(QIcon(":/icons/audio_file.png"));
-    fileBtn->setIconSize(QSize(96, 96));
-    fileBtn->setFixedSize(144, 144);
+    fileBtn->setIconSize(QSize(72, 72));
+    fileBtn->setFixedSize(120, 120);
     fileBtn->setObjectName("fileBtn");
     fileBtn->setStyleSheet(
         "#fileBtn {"
@@ -392,8 +389,8 @@ void MainWindow::createMainMenuPage() {
     // 实时录音按钮
     perfx::ui::AnimatedButton* micBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     micBtn->setIcon(QIcon(":/icons/realtime_ai_audio.png"));
-    micBtn->setIconSize(QSize(96, 96));
-    micBtn->setFixedSize(144, 144);
+    micBtn->setIconSize(QSize(72, 72));
+    micBtn->setFixedSize(120, 120);
     micBtn->setObjectName("micBtn");
     micBtn->setStyleSheet(
         "#micBtn {"
@@ -433,8 +430,8 @@ void MainWindow::createMainMenuPage() {
     // 设置按钮
     perfx::ui::AnimatedButton* settingsBtn = new perfx::ui::AnimatedButton(mainMenuWidget_);
     settingsBtn->setIcon(QIcon(":/icons/settging_asr.png"));
-    settingsBtn->setIconSize(QSize(96, 96));
-    settingsBtn->setFixedSize(144, 144);
+    settingsBtn->setIconSize(QSize(72, 72));
+    settingsBtn->setFixedSize(120, 120);
     settingsBtn->setObjectName("settingsBtn");
     settingsBtn->setStyleSheet(
         "#settingsBtn {"
@@ -487,7 +484,7 @@ void MainWindow::createMainMenuPage() {
         "}"
     );
     fileLabel->setAlignment(Qt::AlignCenter);
-    fileLabel->setFixedWidth(144);
+    fileLabel->setFixedWidth(120);
     
     QLabel* micLabel = new QLabel("实时录音");
     micLabel->setStyleSheet(
@@ -500,7 +497,7 @@ void MainWindow::createMainMenuPage() {
         "}"
     );
     micLabel->setAlignment(Qt::AlignCenter);
-    micLabel->setFixedWidth(144);
+    micLabel->setFixedWidth(120);
     
     QLabel* settingsLabel = new QLabel("系统设置");
     settingsLabel->setStyleSheet(
@@ -513,7 +510,7 @@ void MainWindow::createMainMenuPage() {
         "}"
     );
     settingsLabel->setAlignment(Qt::AlignCenter);
-    settingsLabel->setFixedWidth(144);
+    settingsLabel->setFixedWidth(120);
     
     labelLayout->addWidget(fileLabel, 0, Qt::AlignHCenter);
     labelLayout->addWidget(micLabel, 0, Qt::AlignHCenter);

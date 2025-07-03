@@ -48,7 +48,6 @@ private slots:
     void onSaveConfig();
     void onTestConnection();
     void onBackToMainMenu();
-    void onShowPasswordToggled(bool checked);
     void onConfigChanged();
     void onConfigManagerUpdated();
 
@@ -98,6 +97,8 @@ private:
     QTimer* statusTimer_;
 
     QHBoxLayout* buttonLayout_;
+
+    bool passwordVisible_ = false; // 密码显示/隐藏状态
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;

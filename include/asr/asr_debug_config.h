@@ -41,10 +41,10 @@ enum AsrLogLevel {
 
 #ifdef DEBUG
     #define ASR_DEBUG_MODE
-    #pragma message("ASR: Debug mode enabled (auto-detected from DEBUG macro)")
+    // #pragma message("ASR: Debug mode enabled (auto-detected from DEBUG macro)")
 #elif defined(NDEBUG)
     // Release模式，不启用调试
-    #pragma message("ASR: Release mode detected, debug features disabled")
+    // #pragma message("ASR: Release mode detected, debug features disabled")
 #else
     // 手动控制调试模式（可选）
     // #define ASR_DEBUG_MODE

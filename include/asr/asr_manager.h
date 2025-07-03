@@ -43,11 +43,10 @@ namespace Asr {
 
 /**
  * @brief ASR 客户端类型枚举
+ * 当前项目仅支持IXWebSocket实现
  */
 enum class ClientType {
-    IXWEBSOCKET = 1,    // 基于 IXWebSocket 的实现
-    QT = 2,             // 基于 Qt 的实现
-    WEBSOCKETPP = 3     // 基于 WebSocketpp 的实现
+    IXWEBSOCKET = 1    // 基于 IXWebSocket 的实现
 };
 
 /**
@@ -179,6 +178,9 @@ struct OverallStats {
 
 /**
  * @brief ASR 配置结构体
+ * 
+ * 注意：此配置结构体只包含业务逻辑相关的配置
+ * 火山引擎ASR API相关的配置完全由AsrClient管理
  */
 struct AsrConfig {
     // ============================================================================
@@ -196,24 +198,6 @@ struct AsrConfig {
     std::string secretKey;
     bool isValid = false;  // 配置是否有效
     std::string configSource;  // 配置来源："environment_variables", "trial_mode", "user_config"
-    
-    // ============================================================================
-    // 音频配置
-    // ============================================================================
-    std::string format = "wav";
-    int sampleRate = 16000;
-    int bits = 16;
-    int channels = 1;
-    std::string codec = "raw";
-    
-    // ============================================================================
-    // 请求配置
-    // ============================================================================
-    std::string uid = "test";
-    std::string language = "zh-CN";
-    std::string resultType = "full";
-    bool streaming = true;
-    int segDuration = 100;
     
     // ============================================================================
     // 客户端类型
@@ -247,7 +231,6 @@ struct AsrConfig {
 struct AsrResult {
     std::string text;           // 识别的文本
     std::string logId;          // 日志 ID
-    bool isFinal;               // 是否为最终结果
     double confidence;          // 置信度
     std::map<std::string, std::string> metadata; // 元数据
 };
@@ -256,7 +239,7 @@ struct AsrResult {
  * @brief 音频文件信息结构体
  */
 struct AudioFileInfo {
-    std::string format;      // 音频格式 (wav, mp3, pcm等)
+    std::string format;      // 音频格式 (wav, pcm等)
     int sampleRate;          // 采样率
     int bitsPerSample;       // 位深度
     int channels;            // 声道数
@@ -301,7 +284,6 @@ public:
     // ============================================================================
     void setConfig(const AsrConfig& config);
     AsrConfig getConfig() const;
-    void setClientType(ClientType type);
     void setCallback(AsrCallback* callback);
 
     // ============================================================================
@@ -322,24 +304,10 @@ public:
     // 音频识别
     // ============================================================================
     bool sendAudio(const std::vector<uint8_t>& audioData, bool isLast = false);
-    bool sendAudioFile(const std::string& filePath);
     bool recognizeAudioFile(const std::string& filePath, bool waitForFinal = true, int timeoutMs = 30000);
     bool startRecognition();
     void stopRecognition();
-
-    // ============================================================================
-    // 实时流识别 (新增)
-    // ============================================================================
-    bool startRealtimeStreaming(int sampleRate, int channels, int bitsPerSample);
-    void stopRealtimeStreaming();
-    void pauseRealtimeStreaming();
-    void resumeRealtimeStreaming();
-    bool sendRealtimeAudio(const void* data, size_t frameCount);
     
-    // 实时流状态查询
-    bool isRealtimeStreaming() const { return isRealtimeStreaming_; }
-    bool isRealtimePaused() const { return isRealtimePaused_; }
-
     // ============================================================================
     // 音频文件处理
     // ============================================================================
@@ -353,16 +321,7 @@ public:
     AsrResult getFinalResult() const;
     std::string getLogId() const;
     std::map<std::string, std::string> getResponseHeaders() const;
-
-    // ============================================================================
-    // 音频包管理
-    // ============================================================================
-    bool sendNextAudioPacket();
-    void onAudioAck();
-    bool hasMoreAudioPackets() const;
-    bool isAudioPacketSendingComplete() const;
-    std::string getAudioPacketStatus() const;
-
+    
     // ============================================================================
     // 音频识别方法（异步）
     // ============================================================================
@@ -444,7 +403,6 @@ public:
     // 静态方法
     // ============================================================================
     static bool loadConfigFromEnv(AsrConfig& config);
-    static std::string getClientTypeName(ClientType type);
     static std::string getStatusName(AsrStatus status);
     
     // 计时器相关静态方法
@@ -476,7 +434,6 @@ private:
     bool initializeClient();
     void updateStatus(AsrStatus status);
     AudioFileInfo parseWavFile(const std::string& filePath, const std::vector<uint8_t>& header);
-    AudioFileInfo parseMp3File(const std::string& filePath, const std::vector<uint8_t>& header);
     AudioFileInfo parsePcmFile(const std::string& filePath, const std::vector<uint8_t>& header);
     void recognition_thread_func(const std::string& filePath);
     
@@ -506,14 +463,14 @@ private:
     std::atomic<bool> m_stopFlag{false};
 
     // ============================================================================
-    // 实时流相关成员变量 (新增)
+    // 实时流相关成员变量 (新增) - 暂时注释掉，避免未使用警告
     // ============================================================================
-    bool isRealtimeStreaming_ = false;
-    bool isRealtimePaused_ = false;
-    std::vector<int16_t> realtimeAudioBuffer_;
-    size_t accumulatedFrames_ = 0;
-    size_t targetPacketFrames_ = 0;  // 100ms对应的帧数
-    mutable std::mutex realtimeMutex_;
+    // bool isRealtimeStreaming_ = false;
+    // bool isRealtimePaused_ = false;
+    // std::vector<int16_t> realtimeAudioBuffer_;
+    // size_t accumulatedFrames_ = 0;
+    // size_t targetPacketFrames_ = 0;  // 100ms对应的帧数
+    // mutable std::mutex realtimeMutex_;
     
     // ============================================================================
     // 计时器相关成员变量 (新增)

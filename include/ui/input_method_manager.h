@@ -36,9 +36,6 @@ public:
     
     // 设置环境变量
     void setupEnvironmentVariables();
-    
-    // 设置应用程序属性
-    void setupApplicationAttributes();
 
 private:
     InputMethodManager(QObject* parent = nullptr);

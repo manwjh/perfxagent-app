@@ -119,3 +119,6 @@ logs/
 # 用户特定配置
 user_config/
 personal/
+
+# 项目历史记录目录
+HISTORY/

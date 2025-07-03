@@ -1,6 +1,7 @@
 // This file is being reverted to its original state.
 // The content below is a placeholder representing the original file content.
 // This action is to undo all previous, incorrect edits.
+#include "audio/audio_types.h"  // 主要是一些音频相关的定义，例如WavHeader
 #include "asr/asr_manager.h"
 #include "asr/asr_log_utils.h"
 #include "asr/asr_client.h"
@@ -11,10 +12,10 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <vector>
+#include <thread>
 #include <string>
 #include <cstring>
 #include <chrono>
-#include <thread>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -42,21 +43,6 @@ void logMessage(AsrLogLevel currentLevel, AsrLogLevel messageLevel,
 // ============================================================================
 // 音频文件解析相关结构体和类
 // ============================================================================
-
-// WAV文件头部结构体
-struct WavHeader {
-    char riff[4];           // "RIFF"
-    uint32_t fileSize;      // 文件大小 - 8
-    char wave[4];           // "WAVE"
-    char fmt[4];            // "fmt "
-    uint32_t fmtSize;       // fmt块大小
-    uint16_t audioFormat;   // 音频格式 (1 = PCM)
-    uint16_t numChannels;   // 声道数
-    uint32_t sampleRate;    // 采样率
-    uint32_t byteRate;      // 字节率
-    uint16_t blockAlign;    // 块对齐
-    uint16_t bitsPerSample; // 位深度
-};
 
 // 音频分段器
 class AudioSegmenter {
@@ -158,19 +144,16 @@ AsrConfig AsrManager::getConfig() const {
     return m_config;
 }
 
-void AsrManager::setClientType(ClientType type) {
-    m_config.clientType = type;
-}
-
 void AsrManager::setCallback(AsrCallback* callback) {
     m_callback = callback;
 }
 
+// 获取ASR详细状态信息
 std::string AsrManager::getDetailedStatus() const {
     std::stringstream ss;
     ss << "=== ASR 详细状态信息 ===" << std::endl;
     ss << "连接状态: " << getStatusName(m_status) << std::endl;
-    ss << "客户端类型: " << getClientTypeName(m_config.clientType) << std::endl;
+    ss << "客户端类型: IXWebSocket" << std::endl;
     ss << "是否已连接: " << (isConnected() ? "是" : "否") << std::endl;
     ss << "音频包数量: " << m_audioPackets.size() << std::endl;
     ss << "已发送包数: " << m_audioSendIndex << std::endl;
@@ -183,14 +166,10 @@ std::string AsrManager::getDetailedStatus() const {
     return ss.str();
 }
 
+// 获取音频处理统计信息
 std::string AsrManager::getAudioStats() const {
     std::stringstream ss;
     ss << "=== 音频处理统计 ===" << std::endl;
-    ss << "音频格式: " << m_config.format << std::endl;
-    ss << "采样率: " << m_config.sampleRate << " Hz" << std::endl;
-    ss << "位深度: " << m_config.bits << " bits" << std::endl;
-    ss << "声道数: " << m_config.channels << std::endl;
-    ss << "分段时长: " << m_config.segDuration << " ms" << std::endl;
     ss << "总音频包数: " << m_audioPackets.size() << std::endl;
     ss << "已发送包数: " << m_audioSendIndex << std::endl;
     ss << "识别结果数: " << m_results.size() << std::endl;
@@ -308,28 +287,6 @@ bool AsrManager::sendAudio(const std::vector<uint8_t>& audioData, bool isLast) {
     return true;
 }
 
-bool AsrManager::sendAudioFile(const std::string& filePath) {
-    if (!isConnected()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR 未连接，无法发送音频文件", true);
-        return false;
-    }
-    
-    updateStatus(AsrStatus::RECOGNIZING);
-    
-    if (!m_client->sendAudioFile(filePath)) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频文件失败: " + filePath, true);
-        return false;
-    }
-    
-    // 业务层日志
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "📤 音频文件发送成功: " + filePath);
-    }
-    updateStatus(AsrStatus::CONNECTED);
-    
-    return true;
-}
-
 bool AsrManager::startRecognition() {
     // 确保客户端已初始化并连接
     if (!initializeClient() || !connect()) {
@@ -341,24 +298,29 @@ bool AsrManager::startRecognition() {
     std::string response = m_client->sendFullClientRequestAndGetResponse(10000);
     
     if (!response.empty()) {
-        // 检查响应是否包含错误
-        try {
-            json j = json::parse(response);
-            if (j.contains("error") || (j.contains("code") && j["code"] != 0)) {
-                logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ Full Server Response 包含错误: " + response, true);
-                updateStatus(AsrStatus::ERROR);
-                return false;
+        // 检查客户端是否已准备好接收音频
+        if (m_client->isReadyForAudio()) {
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 识别会话已开始");
+            updateStatus(AsrStatus::RECOGNIZING);
+            return true;
+        } else {
+            // 如果响应不为空但客户端未准备好，可能是错误响应
+            try {
+                json j = json::parse(response);
+                if (j.contains("error") || (j.contains("code") && j["code"] != 0)) {
+                    logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ Full Server Response 包含错误: " + response, true);
+                    updateStatus(AsrStatus::ERROR);
+                    return false;
+                }
+            } catch (const std::exception& e) {
+                // JSON 解析失败，可能是非 JSON 格式的响应
+                logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 无法解析服务器响应: " + response);
             }
-        } catch (const std::exception& e) {
-            // JSON解析失败，但响应不为空，可能是非JSON格式的成功响应
-            if (m_config.enableBusinessLog) {
-                logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 解析Full Server Response失败: " + std::string(e.what()));
-            }
+            
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 识别会话已开始");
+            updateStatus(AsrStatus::RECOGNIZING);
+            return true;
         }
-        
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 识别会话已开始");
-        updateStatus(AsrStatus::RECOGNIZING);
-        return true;
     } else {
         logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 开始识别失败（未收到服务器响应）", true);
         return false;
@@ -422,12 +384,11 @@ std::vector<AsrResult> AsrManager::getAllResults() const {
 }
 
 AsrResult AsrManager::getFinalResult() const {
-    for (const auto& result : m_results) {
-        if (result.isFinal) {
-            return result;
-        }
+    // 由于移除了isFinal字段，返回最后一个结果作为最终结果
+    if (!m_results.empty()) {
+        return m_results.back();
     }
-    // 如果没有找到最终结果，返回一个空的结果
+    // 如果没有结果，返回一个空的结果
     return {};
 }
 
@@ -506,19 +467,6 @@ bool AsrManager::loadConfigFromEnv(AsrConfig& config) {
     return true;
 }
 
-std::string AsrManager::getClientTypeName(ClientType type) {
-    switch (type) {
-        case ClientType::IXWEBSOCKET:
-            return "IXWebSocket";
-        case ClientType::QT:
-            return "Qt WebSocket";
-        case ClientType::WEBSOCKETPP:
-            return "WebSocketpp";
-        default:
-            return "Unknown";
-    }
-}
-
 std::string AsrManager::getStatusName(AsrStatus status) {
     switch (status) {
         case AsrStatus::DISCONNECTED:
@@ -541,21 +489,8 @@ std::string AsrManager::getStatusName(AsrStatus status) {
 // ============================================================================
 
 std::unique_ptr<AsrClient> AsrManager::createClient(ClientType type) {
-    switch (type) {
-        case ClientType::IXWEBSOCKET:
-            return std::make_unique<AsrClient>();
-        case ClientType::QT:
-            // TODO: 实现 Qt 客户端
-            std::cerr << "❌ Qt 客户端暂未实现" << std::endl;
-            return nullptr;
-        case ClientType::WEBSOCKETPP:
-            // TODO: 实现 WebSocketpp 客户端
-            std::cerr << "❌ WebSocketpp 客户端暂未实现" << std::endl;
-            return nullptr;
-        default:
-            std::cerr << "❌ 未知的客户端类型" << std::endl;
-            return nullptr;
-    }
+    (void)type; // 忽略参数，当前只支持IXWebSocket
+    return std::make_unique<AsrClient>();
 }
 
 bool AsrManager::initializeClient() {
@@ -564,7 +499,7 @@ bool AsrManager::initializeClient() {
         return true;
     }
     
-    logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📡 正在创建客户端，类型: " + getClientTypeName(m_config.clientType));
+    logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📡 正在创建IXWebSocket客户端");
     
     m_client = createClient(m_config.clientType);
     if (!m_client) {
@@ -572,23 +507,14 @@ bool AsrManager::initializeClient() {
         return false;
     }
     
-    // 设置客户端配置
+    // 设置客户端配置 - 使用AsrApiConfig
+    // 注意：所有API相关的配置都由AsrClient内部管理，这里只传递必要的认证信息
     m_client->setAppId(m_config.appId);
     m_client->setToken(m_config.accessToken);
     m_client->setSecretKey(m_config.secretKey);
     
-    // 添加调试日志，显示format的值
-    logMessage(m_config.logLevel, ASR_LOG_DEBUG, "🔧 设置音频格式: " + m_config.format + 
-               " (channels=" + std::to_string(m_config.channels) + 
-               ", sampleRate=" + std::to_string(m_config.sampleRate) + 
-               ", bits=" + std::to_string(m_config.bits) + ")");
-    
-    m_client->setAudioFormat(m_config.format, m_config.channels, m_config.sampleRate, m_config.bits);
-    m_client->setUid(m_config.uid);
-    m_client->setLanguage(m_config.language);
-    m_client->setResultType(m_config.resultType);
-    m_client->setStreaming(m_config.streaming);
-    m_client->setSegDuration(m_config.segDuration);
+    // 设置默认音频格式 (这些配置现在由AsrClient管理)
+    m_client->setAudioFormat("pcm", 1, 16000, 16, "raw");
     
     // 将 AsrManager 自身设置为回调处理者
     m_client->setCallback(this);
@@ -631,6 +557,7 @@ bool AsrManager::testConnection(const std::string& appId, const std::string& acc
     
     try {
         std::unique_ptr<AsrClient> client = std::make_unique<AsrClient>();
+        // 设置认证信息
         client->setAppId(appId);
         client->setToken(accessToken);
         client->setSecretKey(secretKey);
@@ -706,8 +633,6 @@ AudioFileInfo AsrManager::parseAudioFile(const std::string& filePath) {
     
     if (magic == "RIFF" && std::string(reinterpret_cast<char*>(header.data() + 8), 4) == "WAVE") {
         return parseWavFile(filePath, header);
-    } else if (magic.substr(0, 3) == "ID3" || magic.substr(0, 2) == "\xff\xfb") {
-        return parseMp3File(filePath, header);
     } else {
         // 假设是PCM文件
         return parsePcmFile(filePath, header);
@@ -740,870 +665,217 @@ bool AsrManager::recognizeAudioFile(const std::string& filePath, bool waitForFin
         return false;
     }
     
-    // 步骤2: 自动配置ASR参数
+    // 步骤2: 验证音频格式是否符合ASR API要求
     if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "=== 步骤2: 自动配置ASR参数 ===");
+        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "=== 步骤2: 验证音频格式 ===");
     }
-    m_config.sampleRate = audioInfo.sampleRate;
-    m_config.channels = audioInfo.channels;
-    m_config.format = "wav";  // 修正：ASR服务器期望WAV格式
-    m_config.segDuration = 100; // 强制100ms分包
+    
+    // 检测到的音频格式信息
+    std::string formatInfo = std::string("🔍 检测到音频格式: ") + 
+                             "format=" + audioInfo.format + 
+                             ", channels=" + std::to_string(audioInfo.channels) + 
+                             ", sampleRate=" + std::to_string(audioInfo.sampleRate) + 
+                             ", bitsPerSample=" + std::to_string(audioInfo.bitsPerSample) + 
+                             ", codec=" + audioInfo.codec;
+    logMessage(m_config.logLevel, ASR_LOG_INFO, formatInfo);
+    
+    // 验证音频格式是否符合ASR API要求
+    // 注意：这里需要先创建客户端来验证格式，但实际连接在后面
+    std::unique_ptr<AsrClient> tempClient = std::make_unique<AsrClient>();
+    auto validation = tempClient->validateAudioFormat("pcm", audioInfo.channels, 
+                                                     audioInfo.sampleRate, audioInfo.bitsPerSample, "raw");
+    
+    if (!validation.isValid) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频格式不符合ASR API要求: " + validation.errorMessage, true);
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "📋 " + tempClient->getSupportedAudioFormats());
+        return false;
+    }
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 音频格式验证通过");
+    
+    // 步骤2.5: 读取音频文件并分包（新增关键步骤）
+    if (m_config.enableFlowLog) {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤2.5: 音频文件读取和分包 ===");
+    }
+    
+    // 读取整个音频文件
+    std::ifstream audioFile(filePath, std::ios::binary);
+    if (!audioFile.is_open()) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开音频文件: " + filePath, true);
+        return false;
+    }
+    
+    // 跳过文件头，只读取音频数据
+    audioFile.seekg(audioInfo.dataOffset);
+    std::vector<uint8_t> audioData;
+    audioData.resize(audioInfo.dataSize);
+    audioFile.read(reinterpret_cast<char*>(audioData.data()), audioInfo.dataSize);
+    audioFile.close();
+    
+    if (audioData.empty()) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频数据为空", true);
+        return false;
+    }
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "📊 读取音频数据: " + std::to_string(audioData.size()) + " 字节");
+    
+    // 计算100ms对应的字节数
+    size_t bytesPerSecond = audioInfo.sampleRate * audioInfo.channels * (audioInfo.bitsPerSample / 8);
+    size_t bytesPer100ms = bytesPerSecond / 10; // 100ms
+    
+    // 分包
+    m_audioPackets.clear();
+    size_t offset = 0;
+    while (offset < audioData.size()) {
+        size_t chunkSize = std::min(bytesPer100ms, audioData.size() - offset);
+        std::vector<uint8_t> packet(audioData.begin() + offset, audioData.begin() + offset + chunkSize);
+        m_audioPackets.push_back(std::move(packet));
+        offset += chunkSize;
+    }
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "📦 音频分包完成: " + std::to_string(m_audioPackets.size()) + " 个包");
+    
+    // 添加调试信息确认分包结果
+    if (m_audioPackets.empty()) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频分包失败：m_audioPackets为空", true);
+        return false;
+    }
+    
+    // 显示前几个包的信息
+    for (size_t i = 0; i < std::min(size_t(3), m_audioPackets.size()); ++i) {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "📦 音频包[" + std::to_string(i) + "]: " + std::to_string(m_audioPackets[i].size()) + " 字节");
+    }
     
     // 步骤3: 连接ASR服务
     if (m_config.enableFlowLog) {
         logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤3: 连接ASR服务 ===");
     }
+    
+    // 确保客户端使用更新后的配置重新初始化
+    if (m_client) {
+        m_client.reset(); // 重置客户端，强制重新初始化
+    }
+    
     if (!connect()) {
         logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 连接ASR服务失败", true);
         return false;
     }
     
-    // 步骤4: 读取音频数据并分包
-    if (m_config.enableFlowLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤4: 读取音频数据并分包 ===");
+    // 根据实际检测到的音频格式设置客户端配置
+    // 注意：这里使用检测到的实际格式，而不是硬编码
+    std::string format = audioInfo.format;
+    if (format == "wav") {
+        format = "pcm"; // WAV文件内部是PCM数据，但格式标识为pcm
     }
     
-    std::vector<uint8_t> audioData;
+    m_client->setAudioFormat(format, audioInfo.channels, audioInfo.sampleRate, audioInfo.bitsPerSample, audioInfo.codec);
     
-    if (m_config.format == "wav") {
-        // 对于WAV文件，发送完整文件（包括头部）
-        std::ifstream audioFile(filePath, std::ios::binary);
-        if (!audioFile.is_open()) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开音频文件", true);
-            return false;
-        }
-        
-        // 读取完整WAV文件（包括头部）
-        audioFile.seekg(0, std::ios::end);
-        size_t fileSize = audioFile.tellg();
-        audioFile.seekg(0, std::ios::beg);
-        
-        audioData.resize(fileSize);
-        audioFile.read(reinterpret_cast<char*>(audioData.data()), fileSize);
-        audioFile.close();
-        
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 成功读取完整WAV文件: " + std::to_string(audioData.size()) + " bytes (包括头部)");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "🎵 音频信息:");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 格式: " + audioInfo.format);
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 采样率: " + std::to_string(audioInfo.sampleRate) + " Hz");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 位深度: " + std::to_string(audioInfo.bitsPerSample) + " bits");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 声道数: " + std::to_string(audioInfo.channels));
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 编解码器: " + audioInfo.codec);
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 文件大小: " + std::to_string(fileSize) + " bytes");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 音频时长: " + std::to_string(audioInfo.duration) + " 秒");
-        }
-    } else {
-        // 对于其他格式，只读取音频数据部分（不包括文件头）
-        std::ifstream audioFile(filePath, std::ios::binary);
-        if (!audioFile.is_open()) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开音频文件", true);
-            return false;
-        }
-        
-        // 跳过文件头，直接读取音频数据
-        audioFile.seekg(audioInfo.dataOffset);
-        audioData.resize(audioInfo.dataSize);
-        audioFile.read(reinterpret_cast<char*>(audioData.data()), audioInfo.dataSize);
-        audioFile.close();
-        
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 成功读取音频数据: " + std::to_string(audioData.size()) + " bytes (仅数据部分)");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "🎵 音频信息:");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 格式: " + audioInfo.format);
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 采样率: " + std::to_string(audioInfo.sampleRate) + " Hz");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 位深度: " + std::to_string(audioInfo.bitsPerSample) + " bits");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 声道数: " + std::to_string(audioInfo.channels));
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 编解码器: " + audioInfo.codec);
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 音频数据大小: " + std::to_string(audioInfo.dataSize) + " bytes");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 音频时长: " + std::to_string(audioInfo.duration) + " 秒");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 数据偏移: " + std::to_string(audioInfo.dataOffset) + " bytes");
-        }
-    }
-    
-    if (audioData.empty()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频数据为空", true);
+    // 步骤4: 发送Full Client Request（初始化包），并等待服务器响应
+    std::string response;
+    if (!m_client->sendFullClientRequestAndWaitResponse(10000, &response)) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 初始化包发送失败或未收到服务器响应", true);
+        m_client->disconnect();
         return false;
     }
-    
-    // 声道转换：如果音频是双声道，转换为单声道
-    if (audioInfo.channels > 1) {
-        if (m_config.format == "wav") {
-            // 对于WAV格式，不进行声道转换，保持原始格式
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "🔄 检测到多声道WAV音频，保持原始格式");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 声道数: " + std::to_string(audioInfo.channels));
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 注意：WAV格式保持原始声道数，不进行转换");
-        } else {
-            // 对于其他格式，进行声道转换
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "🔄 检测到多声道音频，正在转换为单声道...");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 原始声道数: " + std::to_string(audioInfo.channels));
-            
-            // 计算转换后的数据大小
-            size_t originalSamples = audioData.size() / (audioInfo.bitsPerSample / 8);
-            size_t samplesPerChannel = originalSamples / audioInfo.channels;
-            size_t convertedDataSize = samplesPerChannel * (audioInfo.bitsPerSample / 8);
-            
-            std::vector<uint8_t> convertedAudioData(convertedDataSize);
-            
-            // 根据位深度进行转换
-            if (audioInfo.bitsPerSample == 16) {
-                int16_t* originalSamples = reinterpret_cast<int16_t*>(audioData.data());
-                int16_t* convertedSamples = reinterpret_cast<int16_t*>(convertedAudioData.data());
-                
-                for (size_t i = 0; i < samplesPerChannel; ++i) {
-                    int32_t sum = 0;
-                    for (int ch = 0; ch < audioInfo.channels; ++ch) {
-                        sum += originalSamples[i * audioInfo.channels + ch];
-                    }
-                    convertedSamples[i] = static_cast<int16_t>(sum / audioInfo.channels);
-                }
-            } else if (audioInfo.bitsPerSample == 8) {
-                uint8_t* originalSamples = reinterpret_cast<uint8_t*>(audioData.data());
-                uint8_t* convertedSamples = reinterpret_cast<uint8_t*>(convertedAudioData.data());
-                
-                for (size_t i = 0; i < samplesPerChannel; ++i) {
-                    int32_t sum = 0;
-                    for (int ch = 0; ch < audioInfo.channels; ++ch) {
-                        sum += originalSamples[i * audioInfo.channels + ch];
-                    }
-                    convertedSamples[i] = static_cast<uint8_t>(sum / audioInfo.channels);
-                }
-            } else {
-                logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 不支持的位深度: " + std::to_string(audioInfo.bitsPerSample), true);
-                return false;
-            }
-            
-            // 更新音频数据和信息
-            audioData = std::move(convertedAudioData);
-            audioInfo.channels = 1;
-            audioInfo.dataSize = audioData.size();
-            
-            // 重新计算时长
-            audioInfo.duration = static_cast<double>(audioInfo.dataSize) / 
-                               (audioInfo.channels * audioInfo.sampleRate * audioInfo.bitsPerSample / 8);
-            
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 声道转换完成:");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 转换后声道数: " + std::to_string(audioInfo.channels));
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 转换后数据大小: " + std::to_string(audioData.size()) + " bytes");
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "  - 转换后时长: " + std::to_string(audioInfo.duration) + " 秒");
+    // 检查响应是否有错误
+    try {
+        json j = json::parse(response);
+        if (j.contains("error") || (j.contains("code") && j["code"] != 0)) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ Full Server Response 包含错误: " + response, true);
+            m_client->disconnect();
+            return false;
         }
-    }
-    
-    // 更新ASR配置
-    if (m_config.format == "wav") {
-        // 对于WAV格式，保持原始声道数
-        m_config.channels = audioInfo.channels;
-    } else {
-        // 对于其他格式，强制为单声道
-        m_config.channels = 1;
-    }
-    
-    // 计算分段大小 - 按照100ms帧长计算
-    size_t bytesPerSecond = audioInfo.channels * (audioInfo.bitsPerSample / 8) * audioInfo.sampleRate;
-    size_t segmentSize = bytesPerSecond * m_config.segDuration / 1000;
-    
-    if (m_config.enableDataLog) {
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📊 音频分段信息:");
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 每秒字节数: " + std::to_string(bytesPerSecond) + " bytes/s");
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 分段大小: " + std::to_string(segmentSize) + " bytes (100ms)");
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 预计分段数: " + std::to_string((audioData.size() + segmentSize - 1) / segmentSize));
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 实际音频数据大小: " + std::to_string(audioData.size()) + " bytes");
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 理论音频数据大小: " + std::to_string(audioInfo.dataSize) + " bytes");
-    }
-    
-    // 验证音频数据大小是否匹配
-    if (audioData.size() != audioInfo.dataSize) {
-        logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 音频数据大小不匹配:");
-        logMessage(m_config.logLevel, ASR_LOG_WARN, "  - 实际读取: " + std::to_string(audioData.size()) + " bytes");
-        logMessage(m_config.logLevel, ASR_LOG_WARN, "  - 理论大小: " + std::to_string(audioInfo.dataSize) + " bytes");
-    }
-    
-    // 创建音频分段器并分包 - 只对音频数据部分进行分包
-    AudioSegmenter segmenter(audioData, segmentSize);
-    m_audioPackets.clear();
-    m_audioSendIndex = 0;
-    std::vector<uint8_t> chunk;
-    bool isLast;
-    while (segmenter.getNextChunk(chunk, isLast)) {
-        m_audioPackets.push_back(chunk);
-    }
-    
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 音频分包完成: " + std::to_string(m_audioPackets.size()) + " 个包 (仅音频数据)");
+    } catch (...) {
+        // 忽略解析失败，假定成功
     }
 
-    // 步骤5: 启动识别（发送Full Client Request并等待响应）
-    if (m_config.enableFlowLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤5: 启动识别（发送Full Client Request） ===");
-    }
-    if (!startRecognition()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 启动识别失败", true);
-        return false;
-    }
-    
-    // 步骤6: 等待所有音频包发送完成
-    if (m_config.enableFlowLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤6: 等待流式发送完成 ===");
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "🚀 开始流式发送，总共 " + std::to_string(m_audioPackets.size()) + " 个音频包");
-    }
-    
-    // 计算音频帧时长（毫秒）
-    double frameDurationMs = static_cast<double>(m_config.segDuration);
-    
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "🎵 音频帧时长: " + std::to_string(frameDurationMs) + "ms");
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "🎵 采样率: " + std::to_string(m_config.sampleRate) + "Hz");
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "🎵 声道数: " + std::to_string(m_config.channels));
-    }
-    
-    // 记录开始时间
-    auto startTime = std::chrono::high_resolution_clock::now();
-    auto lastPacketTime = startTime;
-    
-    // 等待所有包发送完成，按照音频帧时长精确控制
-    while (m_audioSendIndex < m_audioPackets.size()) {
-        // 检查连接状态
+    // 步骤5: 分包发送音频，每包都等待服务器响应
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤5: 开始发送音频包 ===");
+    for (size_t i = 0; i < m_audioPackets.size(); ++i) {
+        bool isLast = (i == m_audioPackets.size() - 1);
+        int seq = 2 + i;
+        int sendSeq = isLast ? -seq : seq;
+
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "📤 发送音频包 " + std::to_string(i+1) + "/" + std::to_string(m_audioPackets.size()) + " (seq=" + std::to_string(sendSeq) + ")");
+
         if (!m_client->isConnected()) {
             logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 连接已断开，终止流式发送", true);
+            m_client->disconnect();
             return false;
         }
-        
-        // 检查是否收到错误响应
-        auto lastError = m_client->getLastError();
-        if (!lastError.isSuccess()) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 服务器返回错误: " + lastError.message, true);
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "🔍 错误码: " + std::to_string(lastError.code), true);
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "📝 错误详情: " + lastError.details, true);
+        if (!m_client->sendAudio(m_audioPackets[i], sendSeq)) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频包失败 seq=" + std::to_string(sendSeq), true);
+            m_client->disconnect();
             return false;
         }
-        
-        // 计算距离上次发包的时间间隔
-        auto now = std::chrono::high_resolution_clock::now();
-        auto timeSinceLastPacket = std::chrono::duration_cast<std::chrono::microseconds>(now - lastPacketTime);
-        double elapsedMs = timeSinceLastPacket.count() / 1000.0;
-        
-        // 如果距离上次发包的时间小于音频帧时长，需要等待
-        if (elapsedMs < frameDurationMs) {
-            double waitTimeMs = frameDurationMs - elapsedMs;
-            if (m_config.enableBusinessLog) {
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, 
-                         "⏳ 等待音频帧间隔: " + std::to_string(waitTimeMs) + "ms");
-            }
-            std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(waitTimeMs * 1000)));
-        }
-        
-        // 发送音频包
-        if (!sendNextAudioPacket()) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频包失败", true);
+        // 等待服务器响应
+        std::string audioResp;
+        if (!m_client->waitForResponse(3000, &audioResp)) {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 等待音频包响应超时 seq=" + std::to_string(sendSeq), true);
+            m_client->disconnect();
             return false;
         }
-        
-        // 更新上次发包时间
-        lastPacketTime = std::chrono::high_resolution_clock::now();
-        
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_DEBUG, 
-                     "✅ 音频包 " + std::to_string(m_audioSendIndex) + "/" + std::to_string(m_audioPackets.size()) + 
-                     " 发送成功 (帧时长: " + std::to_string(frameDurationMs) + "ms)");
-        }
+        // 可加最小帧间隔sleep (使用固定的100ms间隔)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 所有音频包发送完成");
-    }
-    
-    // 等待最终识别结果（可选）
+
+    // 步骤6: 等待最终识别结果（可选）
     if (waitForFinal) {
-        if (m_config.enableFlowLog) {
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 步骤7: 等待最终识别结果 ===");
-        }
-        
-        // 等待最终识别结果，最多等待指定时间
-        const int maxWaitTimeMs = timeoutMs > 0 ? timeoutMs : 5000; // 默认5秒
-        const int checkIntervalMs = 100; // 每100ms检查一次
-        int totalWaitTimeMs = 0;
-        
-        while (totalWaitTimeMs < maxWaitTimeMs) {
-            // 优先检查是否收到了最终响应包
-            if (m_client && m_client->hasReceivedFinalResponse()) {
-                if (m_config.enableBusinessLog) {
-                    logMessage(m_config.logLevel, ASR_LOG_INFO, "🎯 收到最终响应包，识别结束");
-                }
-                break;
-            }
-            
-            // 检查连接状态
-            if (!m_client->isConnected()) {
-                logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 连接已断开，停止等待最终结果", true);
-                break;
-            }
-            
-            // 检查是否收到错误响应
-            auto lastError = m_client->getLastError();
-            if (!lastError.isSuccess()) {
-                logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 服务器返回错误: " + lastError.message, true);
-                break;
-            }
-            
-            // 等待一段时间后再次检查
-            std::this_thread::sleep_for(std::chrono::milliseconds(checkIntervalMs));
-            totalWaitTimeMs += checkIntervalMs;
-            
-            if (m_config.enableBusinessLog && totalWaitTimeMs % 1000 == 0) {
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, 
-                         "⏳ 等待最终结果中... (" + std::to_string(totalWaitTimeMs/1000) + "s/" + 
-                         std::to_string(maxWaitTimeMs/1000) + "s)");
-            }
-        }
-        
-        if (m_client && m_client->hasReceivedFinalResponse()) {
-            if (m_config.enableFlowLog) {
-                logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 成功收到最终识别结果");
-            }
-        } else {
-            if (m_config.enableFlowLog) {
-                logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 未收到最终识别结果，可能识别未完成");
-            }
+        int totalWait = 0, maxWait = timeoutMs > 0 ? timeoutMs : 5000;
+        while (totalWait < maxWait) {
+            if (m_client->hasReceivedFinalResponse()) break;
+            if (!m_client->isConnected()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            totalWait += 100;
         }
     }
-    
-    if (m_config.enableFlowLog) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 识别流程结束 ===");
-    }
+
+    m_client->disconnect();
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "=== 识别流程结束 ===");
     return true;
 }
 
-bool AsrManager::sendNextAudioPacket() {
-    if (m_stopFlag) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 检测到错误，停止发包", true);
-        return false;
-    }
-    if (m_audioPackets.empty()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频包列表为空，无法发送", true);
-        return false;
-    }
-    if (m_audioSendIndex >= m_audioPackets.size()) {
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 没有更多音频包可发送");
-        }
-        return false;
-    }
-    bool isLast = (m_audioSendIndex == m_audioPackets.size() - 1);
-    int seq = 2 + m_audioSendIndex;
-    int sendSeq = isLast ? -seq : seq;
-    if (!m_client || !m_client->isConnected()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 客户端未连接，无法发送音频包", true);
-        return false;
-    }
-    if (!m_client->sendAudio(m_audioPackets[m_audioSendIndex], sendSeq)) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频包失败 seq=" + std::to_string(sendSeq), true);
-        return false;
-    }
-    m_lastPacketTime = std::chrono::high_resolution_clock::now();
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, 
-                 "📤 音频包发送成功 seq=" + std::to_string(sendSeq) + 
-                 " size=" + std::to_string(m_audioPackets[m_audioSendIndex].size()) + " bytes");
-    }
-    m_audioSendIndex++;
-    return true;
-}
-
-void AsrManager::onAudioAck() {
-    // 收到服务器响应/ACK后，立即发送下一个音频包
-    std::cout << "📨 收到音频包ACK，准备发送下一个包..." << std::endl;
-    if (m_audioPackets.empty()) {
-        std::cerr << "❌ 音频包列表为空，无法继续发送" << std::endl;
-        return;
-    }
-    if (m_audioSendIndex < m_audioPackets.size()) {
-        std::cout << "⏳ 还有 " << (m_audioPackets.size() - m_audioSendIndex) << " 个音频包待发送" << std::endl;
-        if (sendNextAudioPacket()) {
-            std::cout << "✅ 下一个音频包发送成功" << std::endl;
-        } else {
-            std::cerr << "❌ 下一个音频包发送失败" << std::endl;
-        }
-    } else {
-        std::cout << "✅ 所有音频包已发送完成" << std::endl;
-    }
-}
-
-bool AsrManager::hasMoreAudioPackets() const {
-    if (m_status == AsrStatus::ERROR) return false;
-    return m_audioSendIndex < m_audioPackets.size();
-}
-
-bool AsrManager::isAudioPacketSendingComplete() const {
-    return m_audioSendIndex >= m_audioPackets.size();
-}
-
-std::string AsrManager::getAudioPacketStatus() const {
-    std::stringstream ss;
-    ss << "=== 音频包发送状态 ===" << std::endl;
-    ss << "总包数: " << m_audioPackets.size() << std::endl;
-    ss << "已发送: " << m_audioSendIndex << std::endl;
-    ss << "剩余: " << (m_audioPackets.size() - m_audioSendIndex) << std::endl;
-    ss << "发送完成: " << (isAudioPacketSendingComplete() ? "是" : "否") << std::endl;
-    ss << "连接状态: " << (m_client && m_client->isConnected() ? "已连接" : "未连接") << std::endl;
-    ss << "ASR状态: " << getStatusName(m_status) << std::endl;
-    
-    // 添加识别结果统计
-    ss << "识别结果数: " << m_results.size() << std::endl;
-    int finalResultCount = 0;
-    for (const auto& result : m_results) {
-        if (result.isFinal) finalResultCount++;
-    }
-    ss << "最终结果数: " << finalResultCount << std::endl;
-    
-    return ss.str();
-}
-
 // ============================================================================
-// 私有音频文件解析方法
+// 异步音频识别方法实现
 // ============================================================================
-
-AudioFileInfo AsrManager::parseWavFile(const std::string& filePath, const std::vector<uint8_t>& header) {
-    (void)header; // 避免未使用参数警告
-    AudioFileInfo info;
-    info.format = "wav";  // 修正：format表示容器格式，WAV文件应该是"wav"
-    info.codec = "raw";   // codec表示编码格式，PCM数据是"raw"
-    
-    // 读取完整文件
-    std::ifstream file(filePath, std::ios::binary);
-    std::vector<uint8_t> fileData((std::istreambuf_iterator<char>(file)),
-                                   std::istreambuf_iterator<char>());
-    file.close();
-    
-    if (fileData.size() < 44) {
-        std::cerr << "❌ WAV文件太小" << std::endl;
-        return info;
-    }
-    
-    // 解析WAV头部
-    WavHeader* wavHeader = reinterpret_cast<WavHeader*>(fileData.data());
-    
-    info.sampleRate = wavHeader->sampleRate;
-    info.bitsPerSample = wavHeader->bitsPerSample;
-    info.channels = wavHeader->numChannels;
-    
-    // 查找data块
-    size_t offset = 12 + 4 + 4 + wavHeader->fmtSize; // RIFF + WAVE + fmt + fmtSize
-    
-    while (offset + 8 < fileData.size()) {
-        std::string chunkId(reinterpret_cast<char*>(fileData.data() + offset), 4);
-        uint32_t chunkSize = *reinterpret_cast<uint32_t*>(fileData.data() + offset + 4);
-        
-        if (chunkId == "data") {
-            info.dataOffset = offset + 8;
-            info.dataSize = chunkSize;
-            break;
-        }
-        
-        offset += 8 + chunkSize;
-    }
-    
-    if (info.dataOffset == 0) {
-        std::cerr << "❌ 未找到WAV data块" << std::endl;
-        return info;
-    }
-    
-    // 计算时长
-    info.duration = static_cast<double>(info.dataSize) / 
-                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
-    
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析WAV文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << " (WAV容器格式)" << std::endl;
-    std::cout << "  - 编解码器: " << info.codec << " (PCM编码格式)" << std::endl;
-    std::cout << "  - 采样率: " << info.sampleRate << " Hz" << std::endl;
-    std::cout << "  - 位深度: " << info.bitsPerSample << " bits" << std::endl;
-    std::cout << "  - 声道数: " << info.channels << std::endl;
-    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
-    
-    return info;
-}
-
-AudioFileInfo AsrManager::parseMp3File(const std::string& filePath, const std::vector<uint8_t>& header) {
-    (void)header; // 避免未使用参数警告
-    AudioFileInfo info;
-    info.format = "mp3";
-    info.codec = "mp3";
-    
-    // 获取文件大小
-    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开MP3文件: " << filePath << std::endl;
-        return info;
-    }
-    
-    info.dataSize = file.tellg();
-    file.close();
-    
-    // MP3默认参数（简化处理）
-    info.sampleRate = 16000;
-    info.bitsPerSample = 16;
-    info.channels = 1;
-    info.dataOffset = 0; // MP3文件整体作为数据
-    info.duration = info.dataSize / 32000.0; // 估算时长
-    
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析MP3文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << std::endl;
-    std::cout << "  - 文件大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 估算时长: " << info.duration << " 秒" << std::endl;
-    
-    return info;
-}
-
-AudioFileInfo AsrManager::parsePcmFile(const std::string& filePath, const std::vector<uint8_t>& header) {
-    (void)header; // 避免未使用参数警告
-    AudioFileInfo info;
-    info.format = "pcm";
-    info.codec = "raw";
-    
-    // 获取文件大小
-    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开PCM文件: " << filePath << std::endl;
-        return info;
-    }
-    
-    info.dataSize = file.tellg();
-    file.close();
-    
-    // PCM默认参数（需要用户指定或从文件名推断）
-    info.sampleRate = 16000;
-    info.bitsPerSample = 16;
-    info.channels = 1;
-    info.dataOffset = 0; // PCM文件整体作为数据
-    info.duration = static_cast<double>(info.dataSize) / 
-                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
-    
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析PCM文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << std::endl;
-    std::cout << "  - 采样率: " << info.sampleRate << " Hz (默认)" << std::endl;
-    std::cout << "  - 位深度: " << info.bitsPerSample << " bits (默认)" << std::endl;
-    std::cout << "  - 声道数: " << info.channels << " (默认)" << std::endl;
-    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
-    
-    return info;
-}
-
-// ============================================================================
-// AsrCallback 接口实现
-// ============================================================================
-
-void AsrManager::onOpen(AsrClient* client) {
-    (void)client; // 避免未使用参数警告
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ WebSocket 连接已建立");
-    updateStatus(AsrStatus::CONNECTED);
-    
-    if (m_callback) {
-        m_callback->onOpen(client);
-    }
-}
-
-void AsrManager::onMessage(AsrClient* client, const std::string& message) {
-    (void)client;
-    if (m_config.enableBusinessLog) {
-        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📨 收到服务器消息: " + message);
-    }
-    
-    // 首先检查是否为错误响应
-    try {
-        json j = json::parse(message);
-        if (j.contains("error") || (j.contains("code") && j["code"] != 0)) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 收到错误响应: " + message, true);
-            updateStatus(AsrStatus::ERROR);
-            m_stopFlag = true;
-            if (m_client) m_client->disconnect();
-            if (m_callback) {
-                m_callback->onError(client, "服务器返回错误: " + message);
-            }
-            return;
-        }
-    } catch (const std::exception& e) {
-        // JSON解析失败，继续处理
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 解析响应JSON失败: " + std::string(e.what()));
-        }
-    }
-    
-    // 解析识别结果 - 增强实时处理
-    try {
-        json j = json::parse(message);
-        
-        // 处理识别结果
-        if (j.contains("result") && j["result"].contains("text")) {
-            AsrResult result;
-            result.text = j["result"]["text"];
-            result.isFinal = j["result"].value("is_final", false);
-            result.confidence = j["result"].value("confidence", 0.0);
-            
-            // 提取日志ID
-            if (j["result"].contains("additions") && j["result"]["additions"].contains("log_id")) {
-                result.logId = j["result"]["additions"]["log_id"];
-            } else if (j.contains("log_id")) {
-                result.logId = j["log_id"];
-            }
-            
-            // 提取元数据
-            if (j.contains("metadata")) {
-                for (auto& [key, value] : j["metadata"].items()) {
-                    result.metadata[key] = value.dump();
-                }
-            }
-            
-            m_results.push_back(result);
-            m_latestResult = result;
-            
-            // 更新状态为识别中
-            if (!result.isFinal) {
-                updateStatus(AsrStatus::RECOGNIZING);
-            }
-            
-            if (m_config.enableBusinessLog) {
-                std::string statusStr = result.isFinal ? " (最终)" : " (实时)";
-                logMessage(m_config.logLevel, ASR_LOG_INFO, "🎯 识别结果: " + result.text + statusStr);
-            }
-            
-            // 添加详细的调试信息
-            if (m_config.enableDataLog) {
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📊 ASR结果详情:");
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 文本长度: " + std::to_string(result.text.length()));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 是否为最终: " + std::string(result.isFinal ? "是" : "否"));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 置信度: " + std::to_string(result.confidence));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 总结果数: " + std::to_string(m_results.size()));
-                
-                // 统计所有结果的文本长度
-                size_t totalTextLength = 0;
-                for (const auto& r : m_results) {
-                    totalTextLength += r.text.length();
-                }
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 累计文本长度: " + std::to_string(totalTextLength));
-                
-                // 添加音频包发送统计
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📦 音频包发送统计:");
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 总音频包数: " + std::to_string(m_audioPackets.size()));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 已发送包数: " + std::to_string(m_audioSendIndex));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 剩余包数: " + std::to_string(m_audioPackets.size() - m_audioSendIndex));
-                logMessage(m_config.logLevel, ASR_LOG_DEBUG, "  - 发送完成率: " + std::to_string((double)m_audioSendIndex / m_audioPackets.size() * 100) + "%");
-            }
-        }
-        
-        // 处理会话开始消息
-        if (j.contains("code") && j["code"] == 0) {
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR会话已开始");
-            updateStatus(AsrStatus::RECOGNIZING);
-        }
-        
-        // 处理状态信息
-        if (j.contains("status")) {
-            int status = j["status"];
-            if (status == 0) {
-                logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR状态正常");
-            } else {
-                logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ ASR状态异常: " + std::to_string(status));
-            }
-        }
-        
-        // 添加原始消息的调试信息
-        if (m_config.enableProtocolLog) {
-            logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📨 原始ASR消息: " + message);
-        }
-        
-    } catch (const std::exception& e) {
-        if (m_config.enableBusinessLog) {
-            logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 解析识别结果失败: " + std::string(e.what()));
-        }
-    }
-    
-    // 调用回调函数，传递完整的消息和解析后的结果
-    if (m_callback) {
-        m_callback->onMessage(client, message);
-    }
-}
-
-void AsrManager::onError(AsrClient* client, const std::string& error) {
-    m_stopFlag = true;
-    if (m_client) m_client->disconnect();
-    logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ WebSocket 错误: " + error, true);
-    updateStatus(AsrStatus::ERROR);
-    if (m_callback) {
-        m_callback->onError(client, error);
-    }
-}
-
-void AsrManager::onClose(AsrClient* client) {
-    (void)client; // 避免未使用参数警告
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 WebSocket 连接已关闭");
-    updateStatus(AsrStatus::DISCONNECTED);
-    
-    if (m_callback) {
-        m_callback->onClose(client);
-    }
-}
 
 void AsrManager::recognizeAudioFileAsync(const std::string& filePath) {
-    if (m_status == AsrStatus::RECOGNIZING) {
-        logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ ASR 正在识别中，忽略重复请求");
-        return;
-    }
-    stopRecognition();
-
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🚀 启动异步ASR识别线程");
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "📁 目标文件: " + filePath);
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔄 开始异步音频识别: " + filePath);
     
+    // 如果已有工作线程在运行，先停止它
+    if (m_workerThread.joinable()) {
+        logMessage(m_config.logLevel, ASR_LOG_WARN, "⚠️ 检测到正在运行的工作线程，正在停止...");
+        m_stopFlag = true;
+        m_workerThread.join();
+        m_stopFlag = false;
+    }
+    
+    // 启动新的工作线程
     m_workerThread = std::thread(&AsrManager::recognition_thread_func, this, filePath);
+    
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 异步识别任务已启动");
 }
 
 void AsrManager::recognition_thread_func(const std::string& filePath) {
-    m_stopFlag = false; // 启动线程时重置
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔄 ASR识别线程已启动");
-    m_status = AsrStatus::RECOGNIZING;
-
-    // 创建客户端
-    m_client = std::make_unique<AsrClient>();
-    if (!m_client) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 创建ASR客户端失败", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    m_client->setCallback(this);
-    m_client->setAppId(m_config.appId);
-    m_client->setToken(m_config.accessToken);
-    m_client->setSecretKey(m_config.secretKey);
-    m_client->setAudioFormat(m_config.format, m_config.channels, m_config.sampleRate, m_config.bits);
-    m_client->setUid(m_config.uid);
-    m_client->setLanguage(m_config.language);
-    m_client->setResultType(m_config.resultType);
-    m_client->setStreaming(m_config.streaming);
-    m_client->setSegDuration(m_config.segDuration);
-    logMessage(m_config.logLevel, ASR_LOG_DEBUG, "✅ 客户端配置完成");
-
-    // 解析音频文件并分包
-    AudioFileInfo audioInfo = parseAudioFile(filePath);
-    if (!audioInfo.isValid) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频文件解析失败", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 无法打开音频文件", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    
-    std::vector<uint8_t> audioData;
-    
-    // 根据format决定读取方式
-    if (m_config.format == "wav") {
-        // 对于WAV格式，读取完整文件（包括头部）
-        file.seekg(0, std::ios::end);
-        size_t fileSize = file.tellg();
-        file.seekg(0, std::ios::beg);
+    try {
+        logMessage(m_config.logLevel, ASR_LOG_INFO, "🧵 识别线程开始处理: " + filePath);
         
-        audioData.resize(fileSize);
-        file.read(reinterpret_cast<char*>(audioData.data()), fileSize);
+        // 执行同步识别
+        bool success = recognizeAudioFile(filePath, true, 30000);
         
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 读取完整WAV文件: " + std::to_string(audioData.size()) + " bytes (包括头部)");
-    } else {
-        // 对于其他格式，只读取音频数据部分（跳过文件头）
-        file.seekg(audioInfo.dataOffset);
-        audioData.resize(audioInfo.dataSize);
-        file.read(reinterpret_cast<char*>(audioData.data()), audioInfo.dataSize);
-        
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 读取音频数据: " + std::to_string(audioData.size()) + " bytes (仅数据部分)");
-    }
-    
-    file.close();
-    
-    if (audioData.empty()) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 音频数据为空", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-
-    size_t segmentSize = m_config.segDuration * m_config.sampleRate * m_config.channels * m_config.bits / 8 / 1000;
-    if (segmentSize == 0) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 分包大小为0，参数异常", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    m_audioPackets.clear();
-    m_audioSendIndex = 0;
-    for (size_t offset = 0; offset < audioData.size(); offset += segmentSize) {
-        size_t chunkSize = std::min(segmentSize, audioData.size() - offset);
-        std::vector<uint8_t> chunk(audioData.begin() + offset, audioData.begin() + offset + chunkSize);
-        m_audioPackets.push_back(std::move(chunk));
-    }
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 音频分包完成: " + std::to_string(m_audioPackets.size()) + " 个包");
-
-    // 连接ASR服务
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔗 正在连接ASR服务...");
-    if (!m_client->connect()) {
-        auto err = m_client->getLastError();
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR连接失败: " + err.message, true);
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "🔍 错误码: " + std::to_string(err.code), true);
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "📝 错误详情: " + err.details, true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ ASR连接成功，开始发送Full Client Request");
-    if (!m_client->sendFullClientRequestAndWaitResponse(10000)) {
-        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送Full Client Request失败", true);
-        m_status = AsrStatus::ERROR;
-        return;
-    }
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ Full Client Request 发送成功，开始流式发送音频包");
-    // 逐包发送
-    for (size_t i = 0; i < m_audioPackets.size(); ++i) {
-        // 检查停止标志
-        if (m_stopFlag || m_stopRequested) {
-            logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 检测到停止请求，停止音频包发送");
-            break;
+        if (success) {
+            logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 异步识别完成: " + filePath);
+        } else {
+            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 异步识别失败: " + filePath, true);
         }
         
-        bool isLast = (i == m_audioPackets.size() - 1);
-        if (!m_client->sendAudioFile(m_audioPackets[i], isLast, static_cast<int32_t>(i + 1))) {
-            logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 发送音频包失败: " + std::to_string(i), true);
-            m_status = AsrStatus::ERROR;
-            m_stopFlag = true;
-            m_client->disconnect();
-            break;
-        }
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "📦 已发送音频包: " + std::to_string(i + 1) + (isLast ? " (最后一包)" : ""));
-        
-        // 在等待期间也检查停止标志
-        for (int j = 0; j < m_config.segDuration; ++j) {
-            if (m_stopFlag || m_stopRequested) {
-                logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 检测到停止请求，中断等待");
-                goto send_complete;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 识别线程异常: " + std::string(e.what()), true);
+    } catch (...) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 识别线程发生未知异常", true);
     }
     
-send_complete:
-    if (m_stopFlag || m_stopRequested) {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "🛑 ASR识别被用户停止");
-    } else {
-        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 所有音频包发送完成，总包数: " + std::to_string(m_audioPackets.size()));
-    }
-    m_status = AsrStatus::DISCONNECTED;
-    logMessage(m_config.logLevel, ASR_LOG_INFO, "🏁 ASR识别线程已结束");
-    m_stopFlag = false; // 线程结束时重置
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🧵 识别线程结束");
 }
 
 // ============================================================================
@@ -2067,6 +1339,236 @@ bool AsrManager::createDataDirectory() const {
 
 void AsrManager::logStats(const std::string& message) const {
     logMessage(m_config.logLevel, ASR_LOG_DEBUG, "[统计] " + message);
+}
+
+//裸PCM文件
+AudioFileInfo Asr::AsrManager::parsePcmFile(const std::string& filePath, const std::vector<uint8_t>& header) {
+    (void)header; // 避免未使用参数警告
+    AudioFileInfo info;
+    info.format = "pcm";
+    
+    std::ifstream file(filePath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ 无法打开PCM文件" << std::endl;
+        return info;
+    }
+    
+    file.seekg(0, std::ios::end);
+    info.dataSize = file.tellg();
+    file.close();
+    
+    // PCM默认参数（需要用户指定或从文件名推断）
+    info.sampleRate = 16000;
+    info.bitsPerSample = 16;
+    info.channels = 1;
+    info.dataOffset = 0; // PCM文件整体作为数据
+    info.duration = static_cast<double>(info.dataSize) / 
+                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
+    
+    info.isValid = true;
+    
+    std::cout << "📁 成功解析PCM文件: " << filePath << std::endl;
+    std::cout << "🎵 音频信息:" << std::endl;
+    std::cout << "  - 格式: " << info.format << std::endl;
+    std::cout << "  - 采样率: " << info.sampleRate << " Hz (默认)" << std::endl;
+    std::cout << "  - 位深度: " << info.bitsPerSample << " bits (默认)" << std::endl;
+    std::cout << "  - 声道数: " << info.channels << " (默认)" << std::endl;
+    std::cout << "  - 编解码器: " << info.codec << std::endl;
+    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
+    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
+    
+    return info;
+}
+
+//WAV文件,带header
+AudioFileInfo Asr::AsrManager::parseWavFile(const std::string& filePath, const std::vector<uint8_t>& header) {
+    AudioFileInfo info;
+    info.format = "wav";
+    
+    if (header.size() < 12) {  // 至少需要RIFF头
+        std::cerr << "❌ WAV文件头太小" << std::endl;
+        return info;
+    }
+    
+    // 检查WAV文件标识
+    std::string riff(reinterpret_cast<const char*>(header.data()), 4);
+    std::string wave(reinterpret_cast<const char*>(header.data() + 8), 4);
+    
+    if (riff != "RIFF" || wave != "WAVE") {
+        std::cerr << "❌ 无效的WAV文件格式" << std::endl;
+        return info;
+    }
+    
+    // 打开文件进行详细解析
+    std::ifstream file(filePath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ 无法打开WAV文件" << std::endl;
+        return info;
+    }
+    
+    // 从文件开头开始解析所有块
+    file.seekg(0);
+    char chunkId[4];
+    uint32_t chunkSize;
+    bool foundFmt = false;
+    bool foundData = false;
+    
+    // 读取RIFF头
+    file.read(chunkId, 4);
+    file.read(reinterpret_cast<char*>(&chunkSize), 4);
+    file.read(chunkId, 4);  // 读取"WAVE"
+    
+    if (std::string(chunkId, 4) != "WAVE") {
+        std::cerr << "❌ 无效的WAV文件格式" << std::endl;
+        file.close();
+        return info;
+    }
+    
+    // 解析所有块
+    while (file.read(chunkId, 4) && file.read(reinterpret_cast<char*>(&chunkSize), 4)) {
+        std::string chunkName(chunkId, 4);
+        
+        if (chunkName == "fmt ") {
+            // 解析fmt块
+            uint16_t format, channels, bitsPerSample;
+            uint32_t sampleRate, byteRate;
+            uint16_t blockAlign;
+            
+            file.read(reinterpret_cast<char*>(&format), 2);
+            file.read(reinterpret_cast<char*>(&channels), 2);
+            file.read(reinterpret_cast<char*>(&sampleRate), 4);
+            file.read(reinterpret_cast<char*>(&byteRate), 4);
+            file.read(reinterpret_cast<char*>(&blockAlign), 2);
+            file.read(reinterpret_cast<char*>(&bitsPerSample), 2);
+            
+            info.sampleRate = sampleRate;
+            info.bitsPerSample = bitsPerSample;
+            info.channels = channels;
+            info.codec = "PCM";
+            foundFmt = true;
+            
+            // 跳过fmt块的剩余部分
+            if (chunkSize > 16) {
+                file.seekg(chunkSize - 16, std::ios::cur);
+            }
+        } else if (chunkName == "data") {
+            // 找到data块
+            info.dataOffset = file.tellg();
+            info.dataSize = chunkSize;
+            foundData = true;
+            break;  // 找到data块后就可以停止了
+        } else {
+            // 跳过其他块（如LIST、INFO等元数据块）
+            // 注意：chunkSize可能包含填充字节，需要确保正确跳过
+            file.seekg(chunkSize, std::ios::cur);
+            
+            // 如果chunkSize是奇数，需要跳过填充字节
+            if (chunkSize % 2 != 0) {
+                file.seekg(1, std::ios::cur);
+            }
+        }
+    }
+    
+    file.close();
+    
+    if (!foundFmt) {
+        std::cerr << "❌ 未找到WAV格式块" << std::endl;
+        return info;
+    }
+    
+    if (!foundData) {
+        std::cerr << "❌ 未找到WAV数据块" << std::endl;
+        return info;
+    }
+    
+    if (info.dataSize == 0) {
+        std::cerr << "❌ WAV数据块大小为0" << std::endl;
+        return info;
+    }
+    
+    info.duration = static_cast<double>(info.dataSize) / 
+                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
+    info.isValid = true;
+    
+    std::cout << "📁 成功解析WAV文件: " << filePath << std::endl;
+    std::cout << "🎵 音频信息:" << std::endl;
+    std::cout << "  - 格式: " << info.format << std::endl;
+    std::cout << "  - 采样率: " << info.sampleRate << " Hz" << std::endl;
+    std::cout << "  - 位深度: " << info.bitsPerSample << " bits" << std::endl;
+    std::cout << "  - 声道数: " << info.channels << std::endl;
+    std::cout << "  - 编解码器: " << info.codec << std::endl;
+    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
+    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
+    std::cout << "  - 数据偏移: " << info.dataOffset << " bytes" << std::endl;
+    
+    return info;
+}
+
+// ============================================================================
+// AsrCallback 虚函数实现
+// ============================================================================
+
+void Asr::AsrManager::onOpen(AsrClient* client) {
+    (void)client;
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔗 ASR连接已打开");
+    updateStatus(AsrStatus::CONNECTED);
+    
+    // 开始会话计时
+    startSessionTimer();
+}
+
+void Asr::AsrManager::onClose(AsrClient* client) {
+    (void)client;
+    logMessage(m_config.logLevel, ASR_LOG_INFO, "🔌 ASR连接已关闭");
+    updateStatus(AsrStatus::DISCONNECTED);
+    
+    // 结束会话计时
+    endSessionTimer(true);
+}
+
+void Asr::AsrManager::onError(AsrClient* client, const std::string& error) {
+    (void)client;
+    logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ ASR连接错误: " + error, true);
+    updateStatus(AsrStatus::ERROR);
+    
+    // 结束会话计时（标记为未完成）
+    endSessionTimer(false);
+}
+
+void Asr::AsrManager::onMessage(AsrClient* client, const std::string& message) {
+    (void)client;
+    
+    // 记录接收到的消息
+    if (m_config.enableProtocolLog) {
+        logMessage(m_config.logLevel, ASR_LOG_DEBUG, "📨 收到ASR消息: " + message);
+    }
+    
+    // 如果有回调函数，转发消息
+    if (m_callback) {
+        m_callback->onMessage(client, message);
+    }
+    
+    // 解析消息并更新状态
+    try {
+        json j = json::parse(message);
+        
+        // 检查是否为最终响应
+        if (j.contains("result")) {
+            json result = j["result"];
+            if (result.contains("utterances") && result["utterances"].is_array()) {
+                json utterances = result["utterances"];
+                for (const auto& utterance : utterances) {
+                    if (utterance.contains("definite") && utterance["definite"].get<bool>()) {
+                        logMessage(m_config.logLevel, ASR_LOG_INFO, "✅ 收到最终识别结果");
+                        updateStatus(AsrStatus::RECOGNIZING);
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        logMessage(m_config.logLevel, ASR_LOG_ERROR, "❌ 解析ASR消息失败: " + std::string(e.what()), true);
+    }
 }
 
 } // namespace Asr 

@@ -1,6 +1,5 @@
 //
 // 基于 IXWebSocket 的 ASR 客户端实现
-// 参考 asr_ixwebsocket_example.cpp 和 asr_qt_client 的工作流程
 // 完全兼容火山引擎 ASR WebSocket 协议，支持流式音频识别
 //
 
@@ -25,42 +24,23 @@ using json = nlohmann::json;
 namespace Asr {
 
 // ============================================================================
-// 日志工具函数
-// ============================================================================
-
-// 使用公共头文件中的函数，这里不再重复定义
-
-// ============================================================================
 // AsrClient 类实现
 // ============================================================================
 
 AsrClient::AsrClient() : m_connected(false), m_seq(0), m_callback(nullptr), m_readyForAudio(false) {
     std::cout << "[ASR-CRED] AsrClient constructor called" << std::endl;
     
-    // 设置WebSocket回调
+    // ix::WebSocket 只提供 setOnMessageCallback，所有事件（包括 open/close/error/message 等）
+    // 都通过 WebSocketMessageType 区分，在 handleMessage 统一处理。
+    // ⚠️ ASR服务器的API接口，决定了它能接收什么形式的AUDIO数据包。而不是Audio是什么数据，去配置ASR服务器
     m_webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
         this->handleMessage(msg);
     });
     
-    // 注意：ix::WebSocket没有setOnOpenCallback、setOnCloseCallback、setOnErrorCallback方法
-    // 这些事件都在handleMessage中处理
-    
     std::cout << "[ASR-CRED] AsrClient constructor completed" << std::endl;
     
-    m_authType = AuthType::TOKEN;
-    m_format = "raw";
-    m_sampleRate = 16000;
-    m_bits = 16;
-    m_channels = 1;
-    m_codec = "raw";
-    m_uid = "test";
-    m_language = "zh-CN";
-    m_resultType = "full";
-    m_streaming = true;
-    m_segDuration = 100;
+    m_config = AsrApiConfig(); // 使用默认值
     m_finalResponseReceived = false;
-    
-    // 生成唯一的请求ID
     m_reqId = generateUuid();
     
     // 设置 WebSocket 回调
@@ -101,33 +81,50 @@ AsrClient::~AsrClient() {
 // ============================================================================
 
 void AsrClient::setAppId(const std::string& appId) {
-    m_appId = appId;
+    if (appId.empty()) {
+        logErrorWithTimestamp("❌ AppId 不能为空");
+        return;
+    }
+    m_config.appId = appId;
     updateHeaders();
+    logWithTimestamp("✅ AppId 设置成功");
 }
 
 void AsrClient::setToken(const std::string& token) {
-    m_accessToken = token;
+    if (token.empty()) {
+        logErrorWithTimestamp("❌ Token 不能为空");
+        return;
+    }
+    m_config.accessToken = token;
     updateHeaders();
+    logWithTimestamp("✅ Token 设置成功");
 }
 
 void AsrClient::setSecretKey(const std::string& secretKey) {
-    m_secretKey = secretKey;
+    m_config.secretKey = secretKey;
     updateHeaders();
 }
 
-void AsrClient::setAuthType(AuthType authType) {
-    m_authType = authType;
-}
-
-void AsrClient::setAudioFormat(const std::string& format, int channels, int sampleRate, int bits) {
-    m_format = format;
-    m_channels = channels;
-    m_sampleRate = sampleRate;
-    m_bits = bits;
+void AsrClient::setAudioFormat(const std::string& format, int channels, int sampleRate, int bits, const std::string& codec) {
+    // 验证音频格式是否符合ASR API要求
+    AudioFormatValidationResult validation = validateAudioFormat(format, channels, sampleRate, bits, codec);
+    if (!validation.isValid) {
+        logErrorWithTimestamp("❌ " + validation.errorMessage);
+        return;
+    }
+    
+    m_config.format = format;
+    m_config.channels = channels;
+    m_config.sampleRate = sampleRate;
+    m_config.bits = bits;
+    m_config.codec = codec;
+    
+    logWithTimestamp("✅ 音频格式设置成功: " + format + ", " + std::to_string(channels) + 
+                    "ch, " + std::to_string(sampleRate) + "Hz, " + std::to_string(bits) + "bit, codec: " + codec);
 }
 
 void AsrClient::setCluster(const std::string& cluster) {
-    m_cluster = cluster;
+    m_config.cluster = cluster;
 }
 
 void AsrClient::setCallback(AsrCallback* callback) {
@@ -135,23 +132,141 @@ void AsrClient::setCallback(AsrCallback* callback) {
 }
 
 void AsrClient::setUid(const std::string& uid) {
-    m_uid = uid;
+    m_config.uid = uid;
 }
 
 void AsrClient::setLanguage(const std::string& language) {
-    m_language = language;
+    // 验证语言代码
+    if (language.empty()) {
+        logErrorWithTimestamp("❌ 语言代码不能为空");
+        return;
+    }
+    
+    // 支持的语言代码列表（可根据需要扩展）
+    std::vector<std::string> supportedLanguages = {
+        "zh-CN", "zh-TW", "en-US", "en-GB", "ja-JP", "ko-KR"
+    };
+    
+    bool isValid = false;
+    for (const auto& lang : supportedLanguages) {
+        if (language == lang) {
+            isValid = true;
+            break;
+        }
+    }
+    
+    if (!isValid) {
+        logErrorWithTimestamp("❌ 不支持的语言代码: " + language + "，支持的语言: zh-CN, zh-TW, en-US, en-GB, ja-JP, ko-KR");
+        return;
+    }
+    
+    m_config.language = language;
+    logWithTimestamp("✅ 语言设置成功: " + language);
 }
 
 void AsrClient::setResultType(const std::string& resultType) {
-    m_resultType = resultType;
+    m_config.resultType = resultType;
 }
 
 void AsrClient::setStreaming(bool streaming) {
-    m_streaming = streaming;
+    m_config.streaming = streaming;
 }
 
 void AsrClient::setSegDuration(int duration) {
-    m_segDuration = duration;
+    // 验证分段时长
+    if (duration <= 0 || duration > 10000) {
+        logErrorWithTimestamp("❌ 无效的分段时长: " + std::to_string(duration) + "，应在 1-10000ms 范围内");
+        return;
+    }
+    
+    m_config.segDuration = duration;
+    logWithTimestamp("✅ 分段时长设置成功: " + std::to_string(duration) + "ms");
+}
+
+// ============================================================================
+// 火山引擎 ASR 高级配置方法实现
+// ============================================================================
+
+void AsrClient::setModelName(const std::string& modelName) {
+    if (modelName.empty()) {
+        logErrorWithTimestamp("❌ 模型名称不能为空");
+        return;
+    }
+    m_config.modelName = modelName;
+    logWithTimestamp("✅ 模型名称设置成功: " + modelName);
+}
+
+void AsrClient::setEnablePunc(bool enable) {
+    m_config.enablePunc = enable;
+    logWithTimestamp("✅ 标点符号设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setVadSegmentDuration(int duration) {
+    if (duration <= 0 || duration > 10000) {
+        logErrorWithTimestamp("❌ 无效的VAD分段时长: " + std::to_string(duration) + "，应在 1-10000ms 范围内");
+        return;
+    }
+    m_config.vadSegmentDuration = duration;
+    logWithTimestamp("✅ VAD分段时长设置成功: " + std::to_string(duration) + "ms");
+}
+
+void AsrClient::setEnableItn(bool enable) {
+    m_config.enableItn = enable;
+    logWithTimestamp("✅ 数字文本规范化设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableTimestamp(bool enable) {
+    m_config.enableTimestamp = enable;
+    logWithTimestamp("✅ 时间戳设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableVoiceDetection(bool enable) {
+    m_config.enableVoiceDetection = enable;
+    logWithTimestamp("✅ 语音检测设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableSemanticSentenceDetection(bool enable) {
+    m_config.enableSemanticSentenceDetection = enable;
+    logWithTimestamp("✅ 语义句子检测设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableInverseTextNormalization(bool enable) {
+    m_config.enableInverseTextNormalization = enable;
+    logWithTimestamp("✅ 逆文本规范化设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableWordTimeOffset(bool enable) {
+    m_config.enableWordTimeOffset = enable;
+    logWithTimestamp("✅ 词级别时间偏移设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnablePartialResult(bool enable) {
+    m_config.enablePartialResult = enable;
+    logWithTimestamp("✅ 部分结果设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableFinalResult(bool enable) {
+    m_config.enableFinalResult = enable;
+    logWithTimestamp("✅ 最终结果设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableInterimResult(bool enable) {
+    m_config.enableInterimResult = enable;
+    logWithTimestamp("✅ 中间结果设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setEnableSilenceDetection(bool enable) {
+    m_config.enableSilenceDetection = enable;
+    logWithTimestamp("✅ 静音检测设置: " + std::string(enable ? "启用" : "禁用"));
+}
+
+void AsrClient::setSilenceThreshold(int threshold) {
+    if (threshold <= 0 || threshold > 10000) {
+        logErrorWithTimestamp("❌ 无效的静音阈值: " + std::to_string(threshold) + "，应在 1-10000ms 范围内");
+        return;
+    }
+    m_config.silenceThreshold = threshold;
+    logWithTimestamp("✅ 静音阈值设置成功: " + std::to_string(threshold) + "ms");
 }
 
 // ============================================================================
@@ -169,7 +284,17 @@ bool AsrClient::connect() {
             return true;
         }
 
-        m_webSocket.setUrl(m_cluster);
+        // 检查URL是否有效
+        std::string url = m_config.cluster;
+        if (url.empty()) {
+            // 使用默认URL
+            url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+            std::cout << "[ASR-CRED] 使用默认URL: " << url << std::endl;
+        } else {
+            std::cout << "[ASR-CRED] 使用配置URL: " << url << std::endl;
+        }
+
+        m_webSocket.setUrl(url);
         m_webSocket.disableAutomaticReconnection(); // 禁用自动重连，手动控制
         m_webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
             handleMessage(msg);
@@ -180,12 +305,17 @@ bool AsrClient::connect() {
         
         // 等待连接建立，但设置超时
         auto startTime = std::chrono::steady_clock::now();
-        while (!m_webSocket.isConnected() && 
+        while (m_webSocket.getReadyState() != ix::ReadyState::Open && 
                std::chrono::steady_clock::now() - startTime < std::chrono::seconds(5)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
-        m_connected = m_webSocket.isConnected();
+        m_connected = (m_webSocket.getReadyState() == ix::ReadyState::Open);
+        if (m_connected) {
+            std::cout << "[ASR-CRED] WebSocket连接成功" << std::endl;
+        } else {
+            std::cout << "[ASR-CRED] WebSocket连接失败" << std::endl;
+        }
         return m_connected;
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] ASR connection failed: " << e.what() << std::endl;
@@ -281,13 +411,6 @@ bool AsrClient::sendAudioFile(const std::vector<uint8_t>& audioData, bool isLast
     return sendAudio(audioData, isLast ? -sequence : sequence);
 }
 
-// 保留原有接口用于兼容（可直接返回false或加警告）
-bool AsrClient::sendAudioFile(const std::string& filePath) {
-    (void)filePath; // 消除未使用参数警告
-    logErrorWithTimestamp("❌ sendAudioFile(const std::string&) 已废弃，请使用分包后逐包发送");
-    return false;
-}
-
 // ============================================================================
 // 请求发送方法
 // ============================================================================
@@ -298,13 +421,15 @@ bool AsrClient::sendFullClientRequestAndWaitResponse(int timeoutMs, std::string*
         return false;
     }
     
+    // 连接建立后等待短暂时间，确保连接稳定
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    
     // 构造请求 JSON
     json requestParams = constructRequest();
     std::string jsonStr = requestParams.dump();
-#if ASR_ENABLE_PROTOCOL_LOG
+    // 打印Full Client Request包的json字符串
     logWithTimestamp("📤 JSON_STRING: " + jsonStr);
     logWithTimestamp("📤 JSON原始长度: " + std::to_string(jsonStr.length()) + " bytes");
-#endif
     
     // Gzip 压缩
     std::vector<uint8_t> payload = gzipCompress(jsonStr);
@@ -348,6 +473,9 @@ bool AsrClient::sendFullClientRequestAndWaitResponse(int timeoutMs, std::string*
     std::string binaryData(reinterpret_cast<const char*>(packet.data()), packet.size());
     m_webSocket.sendBinary(binaryData);
     
+    // 递增序列号
+    m_seq++;
+    
     return waitForResponse(timeoutMs, response);
 }
 
@@ -375,65 +503,46 @@ std::string AsrClient::getFullClientRequestJson() const {
 }
 
 // ============================================================================
-// 静态方法
+// 音频格式验证方法实现
 // ============================================================================
 
-AsrClient::Credentials AsrClient::getCredentialsFromEnv() {
-    // ============================================================================
-    // API密钥凭据获取 - 支持多种配置方式
-    // ============================================================================
-    // 配置优先级：
-    // 1. 环境变量 ASR_* (用户自定义，优先级最高)
-    // 2. 混淆配置 (厂商提供，体验模式)
-    // ============================================================================
-    
-    Credentials creds;
-    
-    std::cout << "🔍 [AsrClient] 开始获取API密钥配置..." << std::endl;
-    
-    // 第一优先级：检查用户自定义的ASR_前缀环境变量
-    const char* appId = std::getenv("ASR_APP_ID");
-    const char* accessToken = std::getenv("ASR_ACCESS_TOKEN");
-    const char* secretKey = std::getenv("ASR_SECRET_KEY");
-    
-    if (appId && accessToken) {
-        // 使用用户环境变量配置（优先级最高）
-        creds.appId = appId;
-        creds.accessToken = accessToken;
-        creds.secretKey = secretKey ? secretKey : "";
-        creds.isValid = true;
-        
-        std::cout << "✅ [AsrClient] 使用环境变量中的用户配置" << std::endl;
-        std::cout << "   - 配置来源: ASR_* 环境变量" << std::endl;
-        std::cout << "   - App ID: " << appId << std::endl;
-        std::cout << "   - Access Token: " << accessToken << std::endl;
-        std::cout << "   - Secret Key: " << (secretKey ? secretKey : "未设置") << std::endl;
-        std::cout << "   - 优先级: 最高 (用户自定义)" << std::endl;
-    } else {
-        // 第二优先级：使用厂商提供的混淆配置（体验模式）
-        std::cout << "⚠️  [AsrClient] 环境变量未设置，使用体验模式配置" << std::endl;
-        std::cout << "💡 建议设置环境变量：ASR_APP_ID, ASR_ACCESS_TOKEN, ASR_SECRET_KEY" << std::endl;
-        
-        // 使用SecureKeyManager获取混淆的API密钥（体验模式）
-        creds.appId = Asr::SecureKeyManager::getAppId();
-        creds.accessToken = Asr::SecureKeyManager::getAccessToken();
-        creds.secretKey = Asr::SecureKeyManager::getSecretKey();
-        creds.isValid = true;
-        
-        std::cout << "🎯 [AsrClient] 体验模式：使用厂商混淆配置" << std::endl;
-        std::cout << "   - 配置来源: 厂商混淆配置" << std::endl;
-        std::cout << "   - 生成工具: scripts/generate_obfuscated_keys.py" << std::endl;
-        std::cout << "   - 优先级: 最低 (体验模式)" << std::endl;
-        std::cout << "   - 注意: 有使用次数限制，建议配置自己的密钥" << std::endl;
+AsrClient::AudioFormatValidationResult AsrClient::validateAudioFormat(const std::string& format, int channels, 
+                                                                      int sampleRate, int bits, const std::string& codec) const {
+    // 验证音频格式
+    if (format != "pcm" && format != "wav" && format != "ogg") {
+        return AudioFormatValidationResult(false, "不支持的音频格式: " + format + "，仅支持 pcm/wav/ogg");
     }
     
-    std::cout << "🔍 [AsrClient] API密钥配置获取完成" << std::endl;
-    std::cout << "   - 配置有效: " << (creds.isValid ? "是" : "否") << std::endl;
-    std::cout << "   - App ID长度: " << creds.appId.length() << std::endl;
-    std::cout << "   - Access Token长度: " << creds.accessToken.length() << std::endl;
-    std::cout << "   - Secret Key长度: " << creds.secretKey.length() << std::endl;
+    // 验证声道数
+    if (channels != 1 && channels != 2) {
+        return AudioFormatValidationResult(false, "不支持的声道数: " + std::to_string(channels) + "，仅支持 1(mono)/2(stereo)");
+    }
     
-    return creds;
+    // 验证采样率
+    if (sampleRate != 16000) {
+        return AudioFormatValidationResult(false, "不支持的采样率: " + std::to_string(sampleRate) + "，仅支持 16000");
+    }
+    
+    // 验证位深度
+    if (bits != 16) {
+        return AudioFormatValidationResult(false, "不支持的位深度: " + std::to_string(bits) + "，仅支持 16");
+    }
+    
+    // 验证编解码器
+    if (codec != "raw" && codec != "opus") {
+        return AudioFormatValidationResult(false, "不支持的编解码器: " + codec + "，仅支持 raw/opus");
+    }
+    
+    return AudioFormatValidationResult(true, "");
+}
+
+std::string AsrClient::getSupportedAudioFormats() const {
+    return "支持的音频格式:\n"
+           "- 格式: pcm, wav, ogg\n"
+           "- 声道数: 1 (mono), 2 (stereo)\n"
+           "- 采样率: 16000 Hz\n"
+           "- 位深度: 16 bits\n"
+           "- 编解码器: raw, opus";
 }
 
 // ============================================================================
@@ -450,8 +559,8 @@ void AsrClient::updateHeaders() {
     
     // 火山引擎 ASR 认证头部
     headers["X-Api-Resource-Id"] = "volc.bigasr.sauc.duration";
-    headers["X-Api-Access-Key"] = m_accessToken;
-    headers["X-Api-App-Key"] = m_appId;
+    headers["X-Api-Access-Key"] = m_config.accessToken;
+    headers["X-Api-App-Key"] = m_config.appId;
     headers["X-Api-Request-Id"] = m_reqId;
     
     m_webSocket.setExtraHeaders(headers);
@@ -467,265 +576,22 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
         switch (msg->type) {
             case ix::WebSocketMessageType::Message: {
                 if (msg->binary) {
-                    // 处理二进制消息
-                    if (msg->str.length() >= 2) {
-                        uint8_t messageType = (msg->str[1] & 0xF0) >> 4;
-                        uint8_t flags = msg->str[1] & 0x0F;
-
-                        // message type: b1001 (9), flags: b0011 (3)
-                        if (messageType == 0x09 && flags == 0x03) {
-                            // 使用try_lock避免死锁
-                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-                            if (lock.owns_lock()) {
-                                m_finalResponseReceived = true;
-                                logWithTimestamp("🎯 收到最终结果响应 (Full Server Response)");
-                                m_cv.notify_one(); // 通知等待的线程
-                            } else {
-                                logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
-                            }
-                        }
-                    }
-#if ASR_ENABLE_PROTOCOL_LOG
-                    logWithTimestamp("📨 收到二进制消息，大小: " + std::to_string(msg->wireSize) + " 字节");
-                    
-                    // 打印前20字节的十六进制
-                    logWithTimestamp("🔍 原始数据(前20字节): " + hexString(std::vector<uint8_t>(msg->str.begin(), msg->str.begin() + std::min(size_t(20), msg->str.size()))));
-#endif
-                    
-                    // 解析二进制协议
-                    std::string jsonResponse = parseBinaryResponse(msg->str);
-                    if (!jsonResponse.empty()) {
-#if ASR_ENABLE_PROTOCOL_LOG
-                        logWithTimestamp("🧹 解析后的响应: " + jsonResponse);
-#endif
-                        
-                        // 解析错误信息
-                        if (hasError(jsonResponse)) {
-                            m_lastError = parseErrorResponse(jsonResponse);
-                            logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
-#if ASR_ENABLE_PROTOCOL_LOG
-                            logWithTimestamp("🔍 错误码: " + std::to_string(m_lastError.code));
-                            logWithTimestamp("📝 错误详情: " + m_lastError.message);
-#endif
-                            
-                            if (m_callback) {
-                                m_callback->onError(this, m_lastError.message);
-                            }
-                            return;
-                        }
-                        
-                        // 尝试解析 JSON 获取 log_id 和检查最终响应
-                        try {
-                            if (jsonResponse.empty()) {
-                                logWithTimestamp("⚠️ 收到空的JSON响应");
-                                break;
-                            }
-                            json j = json::parse(jsonResponse);
-                            if (j.contains("result") && j["result"].contains("additions") && 
-                                j["result"]["additions"].contains("log_id")) {
-                                m_logId = j["result"]["additions"]["log_id"];
-#if ASR_ENABLE_PROTOCOL_LOG
-                                logWithTimestamp("🔍 提取到 log_id: " + m_logId);
-#endif
-                            }
-                            
-                            // 检查是否为最终响应
-                            bool isFinalResponse = false;
-                            if (j.contains("result")) {
-                                json result = j["result"];
-                                
-                                // 检查utterances中的definite字段
-                                if (result.contains("utterances") && result["utterances"].is_array()) {
-                                    for (const auto& utterance : result["utterances"]) {
-                                        if (utterance.contains("definite") && utterance["definite"].get<bool>()) {
-                                            isFinalResponse = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                // 检查是否有is_final字段
-                                if (result.contains("is_final") && result["is_final"].get<bool>()) {
-                                    isFinalResponse = true;
-                                }
-                            }
-                            
-                            // 如果检测到最终响应，设置标志
-                            if (isFinalResponse) {
-                                // 使用try_lock避免死锁
-                                std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-                                if (lock.owns_lock()) {
-                                    m_finalResponseReceived = true;
-                                    logWithTimestamp("🎯 检测到最终识别结果");
-                                    m_cv.notify_one(); // 通知等待的线程
-                                } else {
-                                    logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
-                                }
-                            }
-                            
-                        } catch (const std::exception& e) {
-                            logWithTimestamp("⚠️ 解析Full Server Response失败: " + std::string(e.what()));
-                        }
-                        
-                        if (m_callback && !jsonResponse.empty()) {
-                            m_callback->onMessage(this, jsonResponse);
-                        }
-                        
-                        // 检查是否为Full Server Response或ACK
-                        if (!jsonResponse.empty()) {
-                            if (jsonResponse.find("\"result\"") != std::string::npos ||
-                                jsonResponse.find("\"code\":0") != std::string::npos ||
-                                jsonResponse.find("\"status\":0") != std::string::npos) {
-                                // 使用try_lock避免死锁
-                                std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-                                if (lock.owns_lock()) {
-                                    m_readyForAudio = true;
-                                    logWithTimestamp("✅ 识别会话已开始");
-                                    m_cv.notify_one(); // 通知等待的线程
-                                } else {
-                                    logWithTimestamp("⚠️ 无法获取锁，跳过会话开始处理");
-                                }
-                            }
-                        }
-                    }
+                    handleBinaryMessage(msg);
                 } else {
-                    // 处理文本消息
-#if ASR_ENABLE_PROTOCOL_LOG
-                    logWithTimestamp("📨 收到文本消息: " + msg->str);
-#endif
-                    
-                    // 解析错误信息
-                    if (hasError(msg->str)) {
-                        m_lastError = parseErrorResponse(msg->str);
-                        logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
-#if ASR_ENABLE_PROTOCOL_LOG
-                        logWithTimestamp("🔍 错误码: " + std::to_string(m_lastError.code));
-                        logWithTimestamp("📝 错误详情: " + m_lastError.message);
-#endif
-                        
-                        if (m_callback) {
-                            m_callback->onError(this, m_lastError.message);
-                        }
-                        return;
-                    }
-                    
-                    // 尝试解析 JSON 获取 log_id 和检查最终响应
-                    try {
-                        if (msg->str.empty()) {
-                            logWithTimestamp("⚠️ 收到空的文本消息");
-                            break;
-                        }
-                        json j = json::parse(msg->str);
-                        if (j.contains("result") && j["result"].contains("additions") && 
-                            j["result"]["additions"].contains("log_id")) {
-                            m_logId = j["result"]["additions"]["log_id"];
-#if ASR_ENABLE_PROTOCOL_LOG
-                            logWithTimestamp("🔍 提取到 log_id: " + m_logId);
-#endif
-                        }
-                        
-                        // 检查是否为最终响应
-                        bool isFinalResponse = false;
-                        if (j.contains("result")) {
-                            json result = j["result"];
-                            
-                            // 检查utterances中的definite字段
-                            if (result.contains("utterances") && result["utterances"].is_array()) {
-                                for (const auto& utterance : result["utterances"]) {
-                                    if (utterance.contains("definite") && utterance["definite"].get<bool>()) {
-                                        isFinalResponse = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            
-                            // 检查是否有is_final字段
-                            if (result.contains("is_final") && result["is_final"].get<bool>()) {
-                                isFinalResponse = true;
-                            }
-                        }
-                        
-                        // 如果检测到最终响应，设置标志
-                        if (isFinalResponse) {
-                            // 使用try_lock避免死锁
-                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-                            if (lock.owns_lock()) {
-                                m_finalResponseReceived = true;
-                                logWithTimestamp("🎯 检测到最终识别结果");
-                                m_cv.notify_one(); // 通知等待的线程
-                            } else {
-                                logWithTimestamp("⚠️ 无法获取锁，跳过最终响应处理");
-                            }
-                        }
-                        
-                    } catch (const std::exception& e) {
-                        logWithTimestamp("⚠️ 解析文本消息JSON失败: " + std::string(e.what()));
-                    }
-                    
-                    if (m_callback && !msg->str.empty()) {
-                        m_callback->onMessage(this, msg->str);
-                    }
-                    
-                    // 检查是否为Full Server Response或ACK
-                    if (!msg->str.empty()) {
-                        if (msg->str.find("\"result\"") != std::string::npos ||
-                            msg->str.find("\"code\":0") != std::string::npos ||
-                            msg->str.find("\"status\":0") != std::string::npos) {
-                            // 使用try_lock避免死锁
-                            std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-                            if (lock.owns_lock()) {
-                                m_readyForAudio = true;
-                                logWithTimestamp("✅ 识别会话已开始");
-                                m_cv.notify_one(); // 通知等待的线程
-                            } else {
-                                logWithTimestamp("⚠️ 无法获取锁，跳过会话开始处理");
-                            }
-                        }
-                    }
+                    handleTextMessage(msg);
                 }
                 break;
             }
             case ix::WebSocketMessageType::Open: {
-                logWithTimestamp("✅ WebSocket 连接已建立");
-                m_connected = true;
-                
-                // 获取响应头
-                const auto& headers = msg->openInfo.headers;
-                for (const auto& header : headers) {
-                    m_responseHeaders[header.first] = header.second;
-                    logWithTimestamp("📋 响应头: " + header.first + ": " + header.second);
-                }
-                
-                // 特别关注 X-Tt-Logid
-                if (headers.find("X-Tt-Logid") != headers.end()) {
-                    logWithTimestamp("🎯 成功获取 X-Tt-Logid: " + headers.at("X-Tt-Logid"));
-                } else {
-                    logWithTimestamp("⚠️  未找到 X-Tt-Logid");
-                }
-                
-                if (m_callback) {
-                    m_callback->onOpen(this);
-                }
+                handleConnectionOpen(msg);
                 break;
             }
             case ix::WebSocketMessageType::Close: {
-                logWithTimestamp("🔌 WebSocket 连接已关闭 (code: " + std::to_string(msg->closeInfo.code) + ", reason: " + msg->closeInfo.reason + ")");
-                m_connected = false;
-                
-                if (m_callback) {
-                    m_callback->onClose(this);
-                }
+                handleConnectionClose(msg);
                 break;
             }
             case ix::WebSocketMessageType::Error: {
-                logErrorWithTimestamp("❌ WebSocket 错误: " + msg->errorInfo.reason);
-                logErrorWithTimestamp("🔍 错误详情: HTTP状态=" + std::to_string(msg->errorInfo.http_status) 
-                         + ", 重试次数=" + std::to_string(msg->errorInfo.retries) 
-                         + ", 等待时间=" + std::to_string(msg->errorInfo.wait_time) + "ms");
-                
-                if (m_callback) {
-                    m_callback->onError(this, msg->errorInfo.reason);
-                }
+                handleConnectionError(msg);
                 break;
             }
             case ix::WebSocketMessageType::Fragment: {
@@ -748,24 +614,275 @@ void AsrClient::handleMessage(const ix::WebSocketMessagePtr& msg) {
     }
 }
 
+void AsrClient::handleBinaryMessage(const ix::WebSocketMessagePtr& msg) {
+    if (msg->str.length() < 4) {
+        logErrorWithTimestamp("❌ 二进制消息太短，无法解析协议头");
+        return;
+    }
+    
+    uint8_t messageType = (msg->str[1] & 0xF0) >> 4;
+    uint8_t flags = msg->str[1] & 0x0F;
+    
+#if ASR_ENABLE_PROTOCOL_LOG
+    logWithTimestamp("📨 收到二进制消息，大小: " + std::to_string(msg->wireSize) + " 字节");
+    logWithTimestamp("🔍 消息类型: " + std::to_string(messageType) + ", 标志: " + std::to_string(flags));
+    logWithTimestamp("🔍 原始数据(前20字节): " + hexString(std::vector<uint8_t>(msg->str.begin(), msg->str.begin() + std::min(size_t(20), msg->str.size()))));
+#endif
+    
+    switch (messageType) {
+        case FULL_SERVER_RESPONSE: // 0x09
+            handleFullServerResponse(msg, flags);
+            break;
+        case SERVER_ACK: // 0x0B
+            handleServerAck(msg);
+            break;
+        case ERROR_RESPONSE: // 0x0F
+            handleErrorResponse(msg);
+            break;
+        default:
+            logWithTimestamp("⚠️ 未知消息类型: " + std::to_string(messageType) + " (0x" + 
+                           std::to_string(messageType) + ")");
+            // 尝试解析为错误响应
+            if (messageType == 0x0F) {
+                logWithTimestamp("🔄 尝试解析为错误响应");
+                handleErrorResponse(msg);
+            }
+    }
+}
+
+void AsrClient::handleFullServerResponse(const ix::WebSocketMessagePtr& msg, uint8_t flags) {
+    // 基于协议标志判断是否为最终响应
+    if (flags == 0x03) { // 最后一包音频结果
+        setFinalResponseReceived();
+        logWithTimestamp("🎯 收到最终结果响应 (Full Server Response)");
+    }
+    
+    // 解析二进制协议获取JSON响应
+    std::string jsonResponse = parseBinaryResponse(msg->str);
+    if (!jsonResponse.empty()) {
+#if ASR_ENABLE_PROTOCOL_LOG
+        logWithTimestamp("🧹 解析后的响应: " + jsonResponse);
+#endif
+        processJsonResponse(jsonResponse);
+    }
+}
+
+void AsrClient::handleServerAck(const ix::WebSocketMessagePtr& msg) {
+    logWithTimestamp("✅ 收到服务器确认 (Server ACK)");
+    
+    // 解析ACK消息，可能包含额外信息
+    std::string jsonResponse = parseBinaryResponse(msg->str);
+    if (!jsonResponse.empty()) {
+        processJsonResponse(jsonResponse);
+    }
+}
+
+void AsrClient::handleErrorResponse(const ix::WebSocketMessagePtr& msg) {
+    logErrorWithTimestamp("❌ 收到错误响应");
+    
+    std::string jsonResponse = parseBinaryResponse(msg->str);
+    if (!jsonResponse.empty()) {
+        m_lastError = parseErrorResponse(jsonResponse);
+        logErrorWithTimestamp("❌ 错误详情: " + m_lastError.getErrorDescription());
+        logErrorWithTimestamp("❌ 错误消息: " + m_lastError.message);
+        logErrorWithTimestamp("❌ 错误代码: " + std::to_string(m_lastError.code));
+        
+        // 特别处理"payload unmarshal: no request object before data"错误
+        if (m_lastError.message.find("payload unmarshal: no request object before data") != std::string::npos) {
+            logErrorWithTimestamp("❌ ❌ ASR连接错误: payload unmarshal: no request object before data");
+            logErrorWithTimestamp("🔍 可能原因: 1) 请求格式不正确 2) 发送时机过早 3) 协议版本不匹配");
+        }
+        
+        if (m_callback) {
+            m_callback->onError(this, m_lastError.message);
+        }
+    } else {
+        logErrorWithTimestamp("❌ 无法解析错误响应");
+        if (m_callback) {
+            m_callback->onError(this, "Unknown error response");
+        }
+    }
+}
+
+void AsrClient::handleTextMessage(const ix::WebSocketMessagePtr& msg) {
+#if ASR_ENABLE_PROTOCOL_LOG
+    logWithTimestamp("📨 收到文本消息: " + msg->str);
+#endif
+    
+    // 检查是否有错误
+    if (hasError(msg->str)) {
+        m_lastError = parseErrorResponse(msg->str);
+        logErrorWithTimestamp("❌ 检测到错误: " + m_lastError.getErrorDescription());
+        
+        if (m_callback) {
+            m_callback->onError(this, m_lastError.message);
+        }
+        return;
+    }
+    
+    // 处理JSON响应
+    processJsonResponse(msg->str);
+}
+
+void AsrClient::handleConnectionOpen(const ix::WebSocketMessagePtr& msg) {
+    logWithTimestamp("✅ WebSocket 连接已建立");
+    m_connected = true;
+    
+    // 获取响应头
+    const auto& headers = msg->openInfo.headers;
+    for (const auto& header : headers) {
+        m_responseHeaders[header.first] = header.second;
+        logWithTimestamp("📋 响应头: " + header.first + ": " + header.second);
+    }
+    
+    // 特别关注 X-Tt-Logid
+    if (headers.find("X-Tt-Logid") != headers.end()) {
+        logWithTimestamp("🎯 成功获取 X-Tt-Logid: " + headers.at("X-Tt-Logid"));
+    } else {
+        logWithTimestamp("⚠️ 未找到 X-Tt-Logid");
+    }
+    
+    if (m_callback) {
+        m_callback->onOpen(this);
+    }
+}
+
+void AsrClient::handleConnectionClose(const ix::WebSocketMessagePtr& msg) {
+    logWithTimestamp("🔌 WebSocket 连接已关闭 (code: " + std::to_string(msg->closeInfo.code) + ", reason: " + msg->closeInfo.reason + ")");
+    m_connected = false;
+    
+    if (m_callback) {
+        m_callback->onClose(this);
+    }
+}
+
+void AsrClient::handleConnectionError(const ix::WebSocketMessagePtr& msg) {
+    logErrorWithTimestamp("❌ WebSocket 错误: " + msg->errorInfo.reason);
+    logErrorWithTimestamp("🔍 错误详情: HTTP状态=" + std::to_string(msg->errorInfo.http_status) 
+             + ", 重试次数=" + std::to_string(msg->errorInfo.retries) 
+             + ", 等待时间=" + std::to_string(msg->errorInfo.wait_time) + "ms");
+    
+    if (m_callback) {
+        m_callback->onError(this, msg->errorInfo.reason);
+    }
+}
+
+void AsrClient::processJsonResponse(const std::string& jsonStr) {
+    if (jsonStr.empty()) {
+        logWithTimestamp("⚠️ 收到空的JSON响应");
+        return;
+    }
+    
+    try {
+        json j = json::parse(jsonStr);
+        
+        // 保存实际的响应内容
+        m_lastResponse = jsonStr;
+        
+        // 提取 log_id
+        extractLogId(j);
+        
+        // 检查是否为会话开始响应
+        if (checkSessionStarted(j)) {
+            setReadyForAudio();
+        }
+        
+        // 调用回调函数
+        if (m_callback) {
+            m_callback->onMessage(this, jsonStr);
+        }
+        
+    } catch (const std::exception& e) {
+        logWithTimestamp("⚠️ JSON解析失败: " + std::string(e.what()));
+    }
+}
+
+void AsrClient::extractLogId(const json& j) {
+    if (j.contains("result") && j["result"].contains("additions") && 
+        j["result"]["additions"].contains("log_id")) {
+        m_logId = j["result"]["additions"]["log_id"];
+#if ASR_ENABLE_PROTOCOL_LOG
+        logWithTimestamp("🔍 提取到 log_id: " + m_logId);
+#endif
+    }
+}
+
+bool AsrClient::checkSessionStarted(const json& j) {
+    // 检查是否包含result字段，表示会话已开始
+    return j.contains("result") || 
+           (j.contains("code") && j["code"] == 0) ||
+           (j.contains("status") && j["status"] == 0);
+}
+
+void AsrClient::setFinalResponseReceived() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_finalResponseReceived = true;
+    logWithTimestamp("🎯 设置最终响应标志");
+    m_cv.notify_one();
+}
+
+void AsrClient::setReadyForAudio() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_readyForAudio = true;
+    logWithTimestamp("✅ 识别会话已开始");
+    m_cv.notify_one();
+}
+
+// 构造请求包
 json AsrClient::constructRequest() const {
     json req = {
-        {"user", {
-            {"uid", m_uid}
-        }},
+        {"user", {{"uid", m_config.uid}}},
         {"audio", {
-            {"format", m_format},
-            {"sample_rate", m_sampleRate},
-            {"bits", m_bits},
-            {"channel", m_channels},
-            {"codec", m_codec}
+            {"format", m_config.format},
+            {"sample_rate", m_config.sampleRate},
+            {"bits", m_config.bits},
+            {"channel", m_config.channels},
+            {"codec", m_config.codec}
         }},
         {"request", {
-            {"model_name", "bigmodel"},
-            {"enable_punc", true},
-            {"vad_segment_duration", 800}
+            {"model_name", m_config.modelName},
+            {"enable_punc", m_config.enablePunc},
+            {"vad_segment_duration", m_config.vadSegmentDuration},
+            {"enable_final_result", true},
+            {"enable_interim_result", true},
+            {"language", m_config.language},
+            {"result_type", m_config.resultType}
         }}
     };
+    
+    // 添加可选的高级配置参数
+    if (m_config.enableItn) {
+        req["request"]["enable_itn"] = m_config.enableItn;
+    }
+    if (m_config.enableTimestamp) {
+        req["request"]["enable_timestamp"] = m_config.enableTimestamp;
+    }
+    if (m_config.enableVoiceDetection) {
+        req["request"]["enable_voice_detection"] = m_config.enableVoiceDetection;
+    }
+    if (m_config.enableSemanticSentenceDetection) {
+        req["request"]["enable_semantic_sentence_detection"] = m_config.enableSemanticSentenceDetection;
+    }
+    if (m_config.enableInverseTextNormalization) {
+        req["request"]["enable_inverse_text_normalization"] = m_config.enableInverseTextNormalization;
+    }
+    if (m_config.enableWordTimeOffset) {
+        req["request"]["enable_word_time_offset"] = m_config.enableWordTimeOffset;
+    }
+    if (m_config.enablePartialResult) {
+        req["request"]["enable_partial_result"] = m_config.enablePartialResult;
+    }
+    if (m_config.enableFinalResult) {
+        req["request"]["enable_final_result"] = m_config.enableFinalResult;
+    }
+    if (m_config.enableInterimResult) {
+        req["request"]["enable_interim_result"] = m_config.enableInterimResult;
+    }
+    if (m_config.enableSilenceDetection) {
+        req["request"]["enable_silence_detection"] = m_config.enableSilenceDetection;
+        req["request"]["silence_threshold"] = m_config.silenceThreshold;
+    }
+    
     return req;
 }
 
@@ -867,7 +984,10 @@ bool AsrClient::waitForResponse(int timeoutMs, std::string* response) {
     
     if (received) {
         if (response) {
-            if (m_readyForAudio) {
+            // 返回实际的响应内容，如果没有则返回状态描述
+            if (!m_lastResponse.empty()) {
+                *response = m_lastResponse;
+            } else if (m_readyForAudio) {
                 *response = "Session started"; // 表示会话已开始
             } else {
                 *response = "Final response received"; // 表示收到最终响应
@@ -992,6 +1112,8 @@ std::string AsrClient::getErrorDescription(uint32_t errorCode) {
     }
 }
 
+// 解析二进制协议，详见火山引擎 ASR WebSocket 协议文档：
+// Header(4字节) + [序列号/错误码](4字节) + Payload Size(4字节) + Payload
 std::string AsrClient::parseBinaryResponse(const std::string& binaryData) {
     if (binaryData.size() < 4) {
         logErrorWithTimestamp("❌ 二进制数据太小，无法解析协议头");
@@ -1016,9 +1138,20 @@ std::string AsrClient::parseBinaryResponse(const std::string& binaryData) {
     logWithTimestamp("  - 序列化方法: " + std::to_string(serializationMethod));
     logWithTimestamp("  - 压缩类型: " + std::to_string(compressionType));
     logWithTimestamp("  - 保留字段: " + std::to_string(reserved));
+    
+    // 添加原始数据的十六进制打印，帮助调试
+    std::string hexData;
+    for (size_t i = 0; i < std::min(size_t(32), binaryData.size()); ++i) {
+        char hex[3];
+        snprintf(hex, sizeof(hex), "%02X", static_cast<unsigned char>(binaryData[i]));
+        hexData += hex;
+        if ((i + 1) % 16 == 0) hexData += " ";
+    }
+    logWithTimestamp("  - 原始数据(前32字节): " + hexData);
 #else
     uint8_t headerSize = binaryData[0] & 0x0F;
     uint8_t messageType = (binaryData[1] >> 4) & 0x0F;
+    uint8_t serializationMethod = (binaryData[2] >> 4) & 0x0F;
     uint8_t compressionType = (binaryData[2] & 0x0F);
 #endif
     
@@ -1035,12 +1168,14 @@ std::string AsrClient::parseBinaryResponse(const std::string& binaryData) {
     // 根据消息类型处理 payload
     if (messageType == FULL_SERVER_RESPONSE) {
         // 完整服务器响应: Header(4字节) + 序列号(4字节) + Payload Size(4字节) + Payload
+        // 包含完整的识别结果，可能包含多个utterances和最终状态
         if (payload.size() < 8) {
             logErrorWithTimestamp("❌ payload 太小，无法解析序列号和payload size");
             return "";
         }
         
         // 解析序列号 (4字节，大端序，有符号)
+        // sequence: 对应客户端发送的音频包序列号，用于匹配请求和响应
         int32_t sequence = 0;
         for (int i = 0; i < 4; ++i) {
             sequence = (sequence << 8) | static_cast<unsigned char>(payload[i]);
@@ -1070,19 +1205,132 @@ std::string AsrClient::parseBinaryResponse(const std::string& binaryData) {
         if (compressionType == GZIP_COMPRESSION) {
             std::string decompressed = gzipDecompress(payloadData);
             if (!decompressed.empty()) {
-                return decompressed;
+                // 根据序列化方法处理数据
+                if (serializationMethod == JSON_SERIALIZATION) {
+                    // 验证解压缩后的数据是否为有效的JSON
+                    try {
+                        json parsed = json::parse(decompressed);
+                        (void)parsed; // 避免未使用变量警告
+                        return decompressed;
+                    } catch (const std::exception& e) {
+                        logErrorWithTimestamp("❌ 解压缩后的数据不是有效JSON: " + std::string(e.what()));
+                        logErrorWithTimestamp("❌ 解压缩数据内容: " + decompressed.substr(0, 100));
+                        return "";
+                    }
+                } else {
+                    // 非JSON序列化，直接返回解压缩后的数据
+                    return decompressed;
+                }
             }
         }
         
-        return payloadData;
-    } else if (messageType == ERROR_RESPONSE) {
+        // 验证未压缩的数据
+        if (serializationMethod == JSON_SERIALIZATION) {
+            // 验证未压缩的数据是否为有效的JSON
+            try {
+                json parsed = json::parse(payloadData);
+                (void)parsed; // 避免未使用变量警告
+                return payloadData;
+            } catch (const std::exception& e) {
+                logErrorWithTimestamp("❌ 未压缩的数据不是有效JSON: " + std::string(e.what()));
+                logErrorWithTimestamp("❌ 数据内容: " + payloadData.substr(0, 100));
+                return "";
+            }
+        } else {
+            // 非JSON序列化，直接返回原始数据
+            return payloadData;
+        }
+    }
+    
+    if (messageType == SERVER_ACK) {
+        // 服务器确认响应: Header(4字节) + 序列号(4字节) + [Payload Size(4字节) + Payload]
+        // ACK消息用于确认音频包已被服务器接收，可能包含额外的状态信息
+        if (payload.size() < 4) {
+            logErrorWithTimestamp("❌ ACK payload 太小，无法解析序列号");
+            return "";
+        }
+        
+        // 解析序列号 (4字节，大端序，有符号)
+        // sequence: 确认的音频包序列号，表示服务器已成功接收该音频包
+        int32_t sequence = 0;
+        for (int i = 0; i < 4; ++i) {
+            sequence = (sequence << 8) | static_cast<unsigned char>(payload[i]);
+        }
+        
+#if ASR_ENABLE_PROTOCOL_LOG
+        logWithTimestamp("  - ACK 序列号: " + std::to_string(sequence));
+#endif
+        
+        // 检查是否有额外的 payload
+        if (payload.size() >= 8) {
+            // 解析 payload size (4字节，大端序)
+            uint32_t payloadSize = 0;
+            for (int i = 4; i < 8; ++i) {
+                payloadSize = (payloadSize << 8) | static_cast<unsigned char>(payload[i]);
+            }
+            
+#if ASR_ENABLE_PROTOCOL_LOG
+            logWithTimestamp("  - ACK payload size: " + std::to_string(payloadSize));
+#endif
+            
+            if (payload.size() >= 8 + payloadSize) {
+                std::string payloadData = payload.substr(8, payloadSize);
+                
+                // 解压缩
+                if (compressionType == GZIP_COMPRESSION) {
+                    std::string decompressed = gzipDecompress(payloadData);
+                    if (!decompressed.empty()) {
+                        // 根据序列化方法处理数据
+                        if (serializationMethod == JSON_SERIALIZATION) {
+                            // 验证解压缩后的数据是否为有效的JSON
+                            try {
+                                json parsed = json::parse(decompressed);
+                                (void)parsed; // 避免未使用变量警告
+                                return decompressed;
+                            } catch (const std::exception& e) {
+                                logErrorWithTimestamp("❌ ACK解压缩后的数据不是有效JSON: " + std::string(e.what()));
+                                return "";
+                            }
+                        } else {
+                            // 非JSON序列化，直接返回解压缩后的数据
+                            return decompressed;
+                        }
+                    }
+                }
+                
+                // 验证未压缩的数据
+                if (serializationMethod == JSON_SERIALIZATION) {
+                    // 验证未压缩的数据是否为有效的JSON
+                    try {
+                        json parsed = json::parse(payloadData);
+                        (void)parsed; // 避免未使用变量警告
+                        return payloadData;
+                    } catch (const std::exception& e) {
+                        logErrorWithTimestamp("❌ ACK未压缩的数据不是有效JSON: " + std::string(e.what()));
+                        return "";
+                    }
+                } else {
+                    // 非JSON序列化，直接返回原始数据
+                    return payloadData;
+                }
+            }
+        }
+        
+        // 如果没有 payload，返回简单的 ACK 确认
+        return "{\"type\":\"ack\",\"sequence\":" + std::to_string(sequence) + "}";
+    }
+    
+    if (messageType == ERROR_RESPONSE) {
         // 错误响应: Header(4字节) + 错误码(4字节) + Payload Size(4字节) + Payload
+        // 当服务器处理请求时发生错误时返回，包含详细的错误信息
         if (payload.size() < 8) {
             logErrorWithTimestamp("❌ 错误响应 payload 太小");
             return "";
         }
         
         // 解析错误码 (4字节，大端序)
+        // errorCode: 火山引擎ASR官方错误码，用于标识具体的错误类型
+        // 45xxxxxx: 客户端错误，55xxxxxx: 服务器错误
         uint32_t errorCode = 0;
         for (int i = 0; i < 4; ++i) {
             errorCode = (errorCode << 8) | static_cast<unsigned char>(payload[i]);
@@ -1110,11 +1358,39 @@ std::string AsrClient::parseBinaryResponse(const std::string& binaryData) {
         if (compressionType == GZIP_COMPRESSION) {
             std::string decompressed = gzipDecompress(payloadData);
             if (!decompressed.empty()) {
-                return decompressed;
+                // 根据序列化方法处理数据
+                if (serializationMethod == JSON_SERIALIZATION) {
+                    // 验证解压缩后的数据是否为有效的JSON
+                    try {
+                        json parsed = json::parse(decompressed);
+                        (void)parsed; // 避免未使用变量警告
+                        return decompressed;
+                    } catch (const std::exception& e) {
+                        logErrorWithTimestamp("❌ 错误响应解压缩后的数据不是有效JSON: " + std::string(e.what()));
+                        return "";
+                    }
+                } else {
+                    // 非JSON序列化，直接返回解压缩后的数据
+                    return decompressed;
+                }
             }
         }
         
-        return payloadData;
+        // 验证未压缩的数据
+        if (serializationMethod == JSON_SERIALIZATION) {
+            // 验证未压缩的数据是否为有效的JSON
+            try {
+                json parsed = json::parse(payloadData);
+                (void)parsed; // 避免未使用变量警告
+                return payloadData;
+            } catch (const std::exception& e) {
+                logErrorWithTimestamp("❌ 错误响应未压缩的数据不是有效JSON: " + std::string(e.what()));
+                return "";
+            }
+        } else {
+            // 非JSON序列化，直接返回原始数据
+            return payloadData;
+        }
     }
     
     logErrorWithTimestamp("❌ 不支持的消息类型: " + std::to_string(messageType));
@@ -1158,203 +1434,6 @@ std::string AsrClient::gzipDecompress(const std::string& data) {
     
     inflateEnd(&strm);
     return decompressed;
-}
-
-// ============================================================================
-// 音频文件解析方法
-// ============================================================================
-
-// WAV文件头部结构体
-struct WavHeader {
-    char riff[4];           // "RIFF"
-    uint32_t fileSize;      // 文件大小 - 8
-    char wave[4];           // "WAVE"
-    char fmt[4];            // "fmt "
-    uint32_t fmtSize;       // fmt块大小
-    uint16_t audioFormat;   // 音频格式 (1 = PCM)
-    uint16_t numChannels;   // 声道数
-    uint32_t sampleRate;    // 采样率
-    uint32_t byteRate;      // 字节率
-    uint16_t blockAlign;    // 块对齐
-    uint16_t bitsPerSample; // 位深度
-};
-
-AsrClient::AudioFileInfo AsrClient::parseAudioFile(const std::string& filePath) {
-    AudioFileInfo info;
-    
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开音频文件: " << filePath << std::endl;
-        return info;
-    }
-    
-    // 读取文件头
-    std::vector<uint8_t> header(64);
-    file.read(reinterpret_cast<char*>(header.data()), header.size());
-    file.close();
-    
-    if (header.size() < 12) {
-        std::cerr << "❌ 文件太小，无法读取头部" << std::endl;
-        return info;
-    }
-    
-    // 检测文件格式
-    std::string magic(reinterpret_cast<char*>(header.data()), 4);
-    
-    if (magic == "RIFF" && std::string(reinterpret_cast<char*>(header.data() + 8), 4) == "WAVE") {
-        return parseWavFile(filePath, header);
-    } else if (magic.substr(0, 3) == "ID3" || magic.substr(0, 2) == "\xff\xfb") {
-        return parseMp3File(filePath, header);
-    } else {
-        // 假设是PCM文件
-        return parsePcmFile(filePath, header);
-    }
-}
-
-AsrClient::AudioFileInfo AsrClient::parseWavFile(const std::string& filePath, const std::vector<uint8_t>& header) {
-    AudioFileInfo info;
-    info.format = "wav";
-    
-    if (header.size() < sizeof(WavHeader)) {
-        std::cerr << "❌ WAV文件头太小" << std::endl;
-        return info;
-    }
-    
-    const WavHeader* wavHeader = reinterpret_cast<const WavHeader*>(header.data());
-    
-    // 检查WAV文件标识
-    if (std::string(wavHeader->riff, 4) != "RIFF" || std::string(wavHeader->wave, 4) != "WAVE") {
-        std::cerr << "❌ 无效的WAV文件格式" << std::endl;
-        return info;
-    }
-    
-    info.sampleRate = wavHeader->sampleRate;
-    info.bitsPerSample = wavHeader->bitsPerSample;
-    info.channels = wavHeader->numChannels;
-    info.codec = "PCM";
-    
-    // 查找data块
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开WAV文件" << std::endl;
-        return info;
-    }
-    
-    file.seekg(sizeof(WavHeader));
-    char chunkId[4];
-    uint32_t chunkSize;
-    
-    while (file.read(chunkId, 4) && file.read(reinterpret_cast<char*>(&chunkSize), 4)) {
-        if (std::string(chunkId, 4) == "data") {
-            info.dataOffset = file.tellg();
-            info.dataSize = chunkSize;
-            break;
-        }
-        file.seekg(chunkSize, std::ios::cur);
-    }
-    
-    file.close();
-    
-    if (info.dataSize == 0) {
-        std::cerr << "❌ 未找到WAV数据块" << std::endl;
-        return info;
-    }
-    
-    info.duration = static_cast<double>(info.dataSize) / 
-                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析WAV文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << std::endl;
-    std::cout << "  - 采样率: " << info.sampleRate << " Hz" << std::endl;
-    std::cout << "  - 位深度: " << info.bitsPerSample << " bits" << std::endl;
-    std::cout << "  - 声道数: " << info.channels << std::endl;
-    std::cout << "  - 编解码器: " << info.codec << std::endl;
-    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
-    std::cout << "  - 数据偏移: " << info.dataOffset << " bytes" << std::endl;
-    
-    return info;
-}
-
-AsrClient::AudioFileInfo AsrClient::parseMp3File(const std::string& filePath, const std::vector<uint8_t>& header) {
-    (void)header; // 避免未使用参数警告
-    AudioFileInfo info;
-    info.format = "mp3";
-    info.codec = "MP3";
-    
-    // 简单的MP3解析（实际项目中可能需要更复杂的解析）
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开MP3文件" << std::endl;
-        return info;
-    }
-    
-    file.seekg(0, std::ios::end);
-    info.dataSize = file.tellg();
-    file.close();
-    
-    // MP3默认参数（实际应该从文件头解析）
-    info.sampleRate = 44100;
-    info.bitsPerSample = 16;
-    info.channels = 2;
-    info.dataOffset = 0; // MP3文件整体作为数据
-    info.duration = static_cast<double>(info.dataSize) / 
-                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
-    
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析MP3文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << std::endl;
-    std::cout << "  - 采样率: " << info.sampleRate << " Hz (默认)" << std::endl;
-    std::cout << "  - 位深度: " << info.bitsPerSample << " bits (默认)" << std::endl;
-    std::cout << "  - 声道数: " << info.channels << " (默认)" << std::endl;
-    std::cout << "  - 编解码器: " << info.codec << std::endl;
-    std::cout << "  - 文件大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 音频时长: " << info.duration << " 秒 (估算)" << std::endl;
-    
-    return info;
-}
-
-AsrClient::AudioFileInfo AsrClient::parsePcmFile(const std::string& filePath, const std::vector<uint8_t>& header) {
-    (void)header; // 避免未使用参数警告
-    AudioFileInfo info;
-    info.format = "pcm";
-    info.codec = "PCM";
-    
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "❌ 无法打开PCM文件" << std::endl;
-        return info;
-    }
-    
-    file.seekg(0, std::ios::end);
-    info.dataSize = file.tellg();
-    file.close();
-    
-    // PCM默认参数（需要用户指定或从文件名推断）
-    info.sampleRate = 16000;
-    info.bitsPerSample = 16;
-    info.channels = 1;
-    info.dataOffset = 0; // PCM文件整体作为数据
-    info.duration = static_cast<double>(info.dataSize) / 
-                   (info.channels * info.sampleRate * info.bitsPerSample / 8);
-    
-    info.isValid = true;
-    
-    std::cout << "📁 成功解析PCM文件: " << filePath << std::endl;
-    std::cout << "🎵 音频信息:" << std::endl;
-    std::cout << "  - 格式: " << info.format << std::endl;
-    std::cout << "  - 采样率: " << info.sampleRate << " Hz (默认)" << std::endl;
-    std::cout << "  - 位深度: " << info.bitsPerSample << " bits (默认)" << std::endl;
-    std::cout << "  - 声道数: " << info.channels << " (默认)" << std::endl;
-    std::cout << "  - 编解码器: " << info.codec << std::endl;
-    std::cout << "  - 音频数据大小: " << info.dataSize << " bytes" << std::endl;
-    std::cout << "  - 音频时长: " << info.duration << " 秒" << std::endl;
-    
-    return info;
 }
 
 bool AsrClient::testHandshake() {

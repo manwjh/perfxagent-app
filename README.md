@@ -9,7 +9,7 @@
 
 **A Qt6-based cross-platform desktop application focused on audio processing, real-time speech recognition (ASR), and intelligent transcription features**
 
-[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](https://github.com/manwjh/perfxagent-app)
+[![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)](https://github.com/manwjh/perfxagent-app)
 [![Qt](https://img.shields.io/badge/Qt-6.0+-green.svg)](https://www.qt.io/)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-orange.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](https://github.com/manwjh/perfxagent-app)
@@ -481,7 +481,7 @@ cd ..
 
 | 项目 / Item | 版本 / Version | 说明 / Description |
 |-------------|----------------|-------------------|
-| **当前版本** / Current Version | **1.7.0** | 最新稳定版本 / Latest stable version |
+| **当前版本** / Current Version | **1.8.0** | 最新稳定版本 / Latest stable version |
 | **Qt版本** / Qt Version | **Qt6** | 图形界面框架 / GUI framework |
 | **C++标准** / C++ Standard | **C++17** | 编程语言标准 / Programming language standard |
 | **支持平台** / Supported Platforms | **macOS, Linux, Windows** | 跨平台支持 / Cross-platform support |

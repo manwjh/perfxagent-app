@@ -54,19 +54,19 @@ void EnhancedAsrCallback::onClose(Asr::AsrClient* client) {
 void EnhancedAsrCallback::onMessage(Asr::AsrClient* client, const std::string& message) {
     try {
         (void)client;
-        std::cout << "[ASR-THREAD] ASR回调收到消息，长度: " << message.length() << std::endl;
-        std::cout << "[ASR-THREAD] 消息内容: " << message << std::endl;
+        std::cout << "[UI] ASR回调收到消息，长度: " << message.length() << std::endl;
+        std::cout << "[UI] 消息内容: " << message << std::endl;
         
         QJsonDocument doc = QJsonDocument::fromJson(QString::fromUtf8(message.c_str()).toUtf8());
         if (!doc.isObject()) {
-            std::cout << "[ASR-THREAD] JSON解析失败，不是对象" << std::endl;
+            std::cout << "[UI] JSON解析失败，不是对象" << std::endl;
             return;
         }
         
         QJsonObject obj = doc.object();
         
         if (!obj.contains("result")) {
-            std::cout << "[ASR-THREAD] JSON对象不包含result字段" << std::endl;
+            std::cout << "[UI] JSON对象不包含result字段" << std::endl;
             return;
         }
 
@@ -80,11 +80,23 @@ void EnhancedAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
             }
             currentText_ = all_utterances.join('\n');
             m_intermediateLine.clear();
-            std::cout << "[ASR-THREAD] 提取到utterances文本: " << currentText_.toStdString() << std::endl;
+            std::cout << "[UI] 提取到utterances文本: " << currentText_.toStdString() << std::endl;
         } else if (resultObj.contains("text")) {
             QString text = resultObj["text"].toString();
-            bool isFinal = resultObj.contains("is_final") ? resultObj.value("is_final").toBool() : false;
-            std::cout << "[ASR-THREAD] 提取到text: " << text.toStdString() << ", isFinal: " << isFinal << std::endl;
+            
+            // 检查是否为最终结果（通过definite字段或协议标志判断）
+            bool isFinal = false;
+            if (resultObj.contains("result") && resultObj["result"].toObject().contains("utterances")) {
+                QJsonArray utterances = resultObj["result"].toObject()["utterances"].toArray();
+                for (const QJsonValue& utterance : utterances) {
+                    if (utterance.toObject().contains("definite") && utterance.toObject()["definite"].toBool()) {
+                        isFinal = true;
+                        break;
+                    }
+                }
+            }
+            
+            std::cout << "[UI] 提取到text: " << text.toStdString() << ", isFinal: " << isFinal << std::endl;
             if (isFinal) {
                 currentText_.append(text + "\n");
                 m_intermediateLine.clear();
@@ -93,9 +105,9 @@ void EnhancedAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
             }
         }
         
-        std::cout << "[ASR-THREAD] 当前文本: " << currentText_.toStdString() << std::endl;
-        std::cout << "[ASR-THREAD] 中间文本: " << m_intermediateLine.toStdString() << std::endl;
-        std::cout << "[ASR-THREAD] textEdit_指针: " << (textEdit_ ? "有效" : "nullptr") << std::endl;
+        std::cout << "[UI] 当前文本: " << currentText_.toStdString() << std::endl;
+        std::cout << "[UI] 中间文本: " << m_intermediateLine.toStdString() << std::endl;
+        std::cout << "[UI] textEdit_指针: " << (textEdit_ ? "有效" : "nullptr") << std::endl;
         
         if (textEdit_) {
             QMetaObject::invokeMethod(this, [this]{
@@ -110,14 +122,14 @@ void EnhancedAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
                 }
             }, Qt::QueuedConnection);
         } else {
-            std::cout << "[ASR-THREAD] textEdit_为空，跳过UI更新" << std::endl;
+            std::cout << "[UI] textEdit_为空，跳过UI更新" << std::endl;
         }
         
-        std::cout << "[ASR-THREAD] ASR回调处理完成" << std::endl;
+        std::cout << "[UI] ASR回调处理完成" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "[ASR-THREAD][ERROR] ASR回调异常: " << e.what() << std::endl;
+        std::cerr << "[UI][ERROR] ASR回调异常: " << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "[ASR-THREAD][ERROR] ASR回调未知异常" << std::endl;
+        std::cerr << "[UI][ERROR] ASR回调未知异常" << std::endl;
     }
 }
 
@@ -164,55 +176,85 @@ void EnhancedAsrCallback::appendError(const QString& errorMsg) {
 // =================================================================================
 // AudioToTextWindow 实现
 // =================================================================================
-
+// AudioToTextWindow 构造函数
+// =================================================================================
+/**
+ * @brief AudioToTextWindow 构造函数
+ * 
+ * 初始化音频转文本窗口，包括：
+ * 1. 初始化UI组件（文本编辑器、播放控件、按钮等）
+ * 2. 创建音频处理组件（文件导入器、音频转换器）
+ * 3. 获取ASR管理器单例实例
+ * 4. 设置ASR回调函数
+ * 5. 连接信号和槽
+ * 6. 重置窗口状态
+ * 
+ * @param parent 父窗口指针，用于Qt对象树管理
+ * 
+ * @note 该构造函数采用异常安全的设计，确保在初始化失败时能够正确清理资源
+ * @note ASR管理器使用单例模式，避免重复创建实例
+ * @note 所有UI组件在构造函数中创建，确保窗口完全可用
+ */
 AudioToTextWindow::AudioToTextWindow(QWidget *parent)
     : QWidget(parent),
-      textEdit_(nullptr),
-      statusBar_(nullptr),
-      statusLabel_(nullptr),
-      mediaPlayer_(nullptr),
-      audioOutput_(nullptr),
-      playButton_(nullptr),
-      pauseButton_(nullptr),
-      stopButton_(nullptr),
-      playbackSlider_(nullptr),
-      timeLabel_(nullptr),
-      playbackLayout_(nullptr),
-      hasWorkFiles_(false)
+      textEdit_(nullptr),           // 文本编辑区域，显示识别结果
+      statusBar_(nullptr),          // 状态栏（已废弃，保留兼容性）
+      statusLabel_(nullptr),        // 状态标签（已废弃，保留兼容性）
+      mediaPlayer_(nullptr),        // 媒体播放器，用于音频播放
+      audioOutput_(nullptr),        // 音频输出设备
+      playButton_(nullptr),         // 播放按钮
+      pauseButton_(nullptr),        // 暂停按钮
+      stopButton_(nullptr),         // 停止按钮
+      playbackSlider_(nullptr),     // 播放进度滑块
+      timeLabel_(nullptr),          // 时间显示标签
+      playbackLayout_(nullptr),     // 播放控件布局
+      hasWorkFiles_(false)          // 是否有可处理的工作文件
 {
     std::cout << "[UI] Initializing AudioToTextWindow..." << std::endl;
     try {
-        fileImporter_ = std::make_unique<audio::FileImporter>();
-        audioConverter_ = std::make_unique<audio::AudioConverter>();
+        // 步骤1: 创建音频处理组件
+        fileImporter_ = std::make_unique<audio::FileImporter>();    // 文件导入器
+        audioConverter_ = std::make_unique<audio::AudioConverter>(); // 音频格式转换器
         
-        // 使用单例模式的ASR管理器，而不是创建新实例
+        // 步骤2: 获取ASR管理器单例实例（避免重复创建）
         asrManager_ = &Asr::AsrManager::instance();
         
+        // 步骤3: 验证音频转换器创建是否成功
         if (!audioConverter_) {
-            std::cerr << "[AUDIO-THREAD][ERROR] Failed to create AudioConverter" << std::endl;
+            std::cerr << "[UI][ERROR] Failed to create AudioConverter" << std::endl;
             QMessageBox::critical(this, "错误", "音频转换器初始化失败");
             return;
         }
         
-        std::cout << "[AUDIO-THREAD] AudioConverter created successfully" << std::endl;
-        setupUI();
-        setupMenuBar();
-        setupStatusBar();
+        std::cout << "[UI] AudioConverter created successfully" << std::endl;
         
-        // 只传 textEdit_
+        // 步骤4: 初始化用户界面
+        setupUI();           // 设置主界面布局和控件
+        setupMenuBar();      // 设置菜单栏（当前为空实现）
+        setupStatusBar();    // 设置状态栏（当前为空实现）
+        
+        // 步骤5: 创建并设置ASR回调
+        // 创建增强型ASR回调对象，传入文本编辑器用于显示识别结果
         asrCallback_ = std::make_unique<EnhancedAsrCallback>(textEdit_);
         asrManager_->setCallback(asrCallback_.get());
         
-        // 连接ASR完成信号
-        connect(asrCallback_.get(), &EnhancedAsrCallback::finished, this, &AudioToTextWindow::onAsrFinished);
+        // 步骤6: 连接ASR完成信号到对应的槽函数
+        connect(asrCallback_.get(), &EnhancedAsrCallback::finished, 
+                this, &AudioToTextWindow::onAsrFinished);
         
+        // 步骤7: 更新播放控件状态
         updatePlaybackControls();
+        
         std::cout << "[UI] AudioToTextWindow initialization completed" << std::endl;
-        // 每次构造时重置状态
+        
+        // 步骤8: 重置窗口状态，确保初始状态一致
         resetState();
+        
     } catch (const std::exception& e) {
+        // 异常处理：记录具体异常信息
         std::cerr << "[UI][FATAL] Exception in AudioToTextWindow constructor: " << e.what() << std::endl;
     } catch (...) {
+        // 异常处理：记录未知异常
         std::cerr << "[UI][FATAL] Unknown exception in AudioToTextWindow constructor!" << std::endl;
     }
 }
@@ -225,35 +267,34 @@ AudioToTextWindow::~AudioToTextWindow() {
     }
     // 停止 ASR 识别线程
     if (asrManager_) {
-        std::cout << "[ASR-THREAD] Stopping ASR recognition..." << std::endl;
+        std::cout << "[UI] Stopping ASR recognition..." << std::endl;
         asrManager_->stopRecognition();
-        std::cout << "[ASR-THREAD] ASR recognition stopped" << std::endl;
+        std::cout << "[UI] ASR recognition stopped" << std::endl;
     }
     // 断开 ASR 连接
     if (asrManager_) {
-        std::cout << "[ASR-THREAD] Disconnecting ASR..." << std::endl;
+        std::cout << "[UI] Disconnecting ASR..." << std::endl;
         asrManager_->disconnect();
-        std::cout << "[ASR-THREAD] ASR disconnected" << std::endl;
+        std::cout << "[AUDIO_TO_TEXT_WINDOWS] ASR disconnected" << std::endl;
     }
     // 清理 ASR 回调
     if (asrCallback_) {
-        std::cout << "[ASR-THREAD] Cleaning up ASR callback..." << std::endl;
+        std::cout << "[UI] Cleaning up ASR callback..." << std::endl;
         asrCallback_.reset();
-        std::cout << "[ASR-THREAD] ASR callback cleaned up" << std::endl;
+        std::cout << "[UI] ASR callback cleaned up" << std::endl;
     }
-    // 注意：asrManager_现在是单例模式的指针，不需要手动清理
     // 清理音频转换器
     if (audioConverter_) {
-        std::cout << "[AUDIO-THREAD] Cleaning up audio converter..." << std::endl;
+        std::cout << "[UI] Cleaning up audio converter..." << std::endl;
         audioConverter_->stopConversion();
         audioConverter_.reset();
-        std::cout << "[AUDIO-THREAD] Audio converter cleaned up" << std::endl;
+        std::cout << "[UI] Audio converter cleaned up" << std::endl;
     }
     // 清理文件导入器
     if (fileImporter_) {
-        std::cout << "[AUDIO-THREAD] Cleaning up file importer..." << std::endl;
+        std::cout << "[UI] Cleaning up file importer..." << std::endl;
         fileImporter_.reset();
-        std::cout << "[AUDIO-THREAD] File importer cleaned up" << std::endl;
+        std::cout << "[UI] File importer cleaned up" << std::endl;
     }
     std::cout << "[UI] AudioToTextWindow destructor completed" << std::endl;
 }
@@ -418,17 +459,17 @@ void AudioToTextWindow::convertAudio()
     }
 
     if (!audioConverter_) {
-        std::cerr << "[ERROR] AudioConverter is not initialized" << std::endl;
+        std::cerr << "[UI] [ERROR] AudioConverter is not initialized" << std::endl;
         QMessageBox::critical(this, "错误", "音频转换器未初始化");
         return;
     }
 
     textEdit_->append("\n=== 开始转换过程 ===");
-    std::cout << "[DEBUG] Starting conversion process..." << std::endl;
+    std::cout << "[UI] [DEBUG] Starting conversion process..." << std::endl;
 
     // 设置进度回调
     audioConverter_->setProgressCallback([this](const audio::ConversionProgress& progress) {
-        std::cout << "[DEBUG] Progress callback triggered: " << (progress.progress * 100) << "%" << std::endl;
+        std::cout << "[UI] [DEBUG] Progress callback triggered: " << (progress.progress * 100) << "%" << std::endl;
         
         // 更新进度条
         int progressValue = static_cast<int>(progress.progress * 100);
@@ -465,12 +506,12 @@ void AudioToTextWindow::convertAudio()
         textEdit_->append(QString("\n开始转换: %1").arg(QString::fromUtf8(inputFile.c_str())));
         textEdit_->append(QString("输出文件: %1").arg(QString::fromUtf8(outputFile.c_str())));
         
-        std::cout << "[DEBUG] Starting conversion for file: " << inputFile << std::endl;
-        std::cout << "[DEBUG] Output will be saved to: " << outputFile << std::endl;
+        std::cout << "[UI] [DEBUG] Starting conversion for file: " << inputFile << std::endl;
+        std::cout << "[UI] [DEBUG] Output will be saved to: " << outputFile << std::endl;
         
         if (audioConverter_->startConversion(inputFile, outputFile)) {
             textEdit_->append("转换线程已启动，等待完成...");
-            std::cout << "[DEBUG] Conversion thread started successfully" << std::endl;
+            std::cout << "[UI] [DEBUG] Conversion thread started successfully" << std::endl;
             
             // 等待转换完成
             while (audioConverter_->getCurrentProgress().progress < 1.0) {
@@ -478,10 +519,10 @@ void AudioToTextWindow::convertAudio()
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             textEdit_->append(QString("转换完成: %1").arg(QString::fromUtf8(outputFile.c_str())));
-            std::cout << "[DEBUG] Conversion completed successfully" << std::endl;
+            std::cout << "[UI] [DEBUG] Conversion completed successfully" << std::endl;
         } else {
             std::string error = audioConverter_->getLastError();
-            std::cerr << "[ERROR] Conversion failed: " << error << std::endl;
+            std::cerr << "[UI] [ERROR] Conversion failed: " << error << std::endl;
             textEdit_->append(QString("转换失败: %1").arg(QString::fromUtf8(error.c_str())));
         }
     }
@@ -489,7 +530,7 @@ void AudioToTextWindow::convertAudio()
     // 重置进度条
     // progressBar_->setValue(0);
     updateStatusBar("=== 转换过程结束 ===");
-    std::cout << "[DEBUG] Conversion process completed" << std::endl;
+    std::cout << "[UI] [DEBUG] Conversion process completed" << std::endl;
     QMessageBox::information(this, "完成", "所有文件转换完成");
 }
 
@@ -659,15 +700,15 @@ void AudioToTextWindow::startNextAsrTask()
     }
 
     const auto& workFile = *currentWorkFile_;
-    std::cout << "[ASR-THREAD] 开始处理文件: " << workFile << std::endl;
+    std::cout << "[UI] 开始处理文件: " << workFile << std::endl;
     updateStatusBar(QString("正在转录: %1...").arg(QString::fromStdString(workFile)));
     
     // 确保回调被正确设置
     if (asrCallback_) {
-        std::cout << "[ASR-THREAD] ASR回调已设置，开始识别" << std::endl;
+        std::cout << "[UI] ASR回调已设置，开始识别" << std::endl;
         asrManager_->recognizeAudioFileAsync(workFile);
     } else {
-        std::cerr << "[ASR-THREAD][ERROR] ASR回调未设置" << std::endl;
+        std::cerr << "[UI][ERROR] ASR回调未设置" << std::endl;
         QMessageBox::critical(this, "错误", "ASR回调未设置");
     }
 }
@@ -703,9 +744,9 @@ void AudioToTextWindow::asrTranscribe()
         asrManager_->startAsrThread();
     }
     
-    std::cout << "[ASR-THREAD] 开始ASR转录" << std::endl;
-    std::cout << "[ASR-THREAD] textEdit_指针: " << (textEdit_ ? "有效" : "nullptr") << std::endl;
-    std::cout << "[ASR-THREAD] asrCallback_指针: " << (asrCallback_ ? "有效" : "nullptr") << std::endl;
+    std::cout << "[UI] 开始ASR转录" << std::endl;
+    std::cout << "[UI] textEdit_指针: " << (textEdit_ ? "有效" : "nullptr") << std::endl;
+    std::cout << "[UI] asrCallback_指针: " << (asrCallback_ ? "有效" : "nullptr") << std::endl;
     
     textEdit_->clear();
     textEdit_->append("=== ASR 转录开始 ===");
@@ -781,7 +822,7 @@ QString AudioToTextWindow::formatTime(qint64 milliseconds)
 
 void AudioToTextWindow::backToMainMenu()
 {
-    std::cout << "[DEBUG] AudioToTextWindow backToMainMenu called" << std::endl;
+    std::cout << "[UI][DEBUG] AudioToTextWindow backToMainMenu called" << std::endl;
     
     // 停止媒体播放器
     if (mediaPlayer_) {
@@ -790,16 +831,16 @@ void AudioToTextWindow::backToMainMenu()
     
     // 停止 ASR 识别线程
     if (asrManager_) {
-        std::cout << "[DEBUG] Stopping ASR recognition in backToMainMenu..." << std::endl;
+        std::cout << "[UI][DEBUG] Stopping ASR recognition in backToMainMenu..." << std::endl;
         asrManager_->stopRecognition();
-        std::cout << "[DEBUG] ASR recognition stopped in backToMainMenu" << std::endl;
+        std::cout << "[UI][DEBUG] ASR recognition stopped in backToMainMenu" << std::endl;
     }
     
     // 断开 ASR 连接
     if (asrManager_) {
-        std::cout << "[DEBUG] Disconnecting ASR in backToMainMenu..." << std::endl;
+        std::cout << "[UI][DEBUG] Disconnecting ASR in backToMainMenu..." << std::endl;
         asrManager_->disconnect();
-        std::cout << "[DEBUG] ASR disconnected in backToMainMenu" << std::endl;
+        std::cout << "[UI][DEBUG] ASR disconnected in backToMainMenu" << std::endl;
     }
     
     // 关闭ASR线程
@@ -809,28 +850,28 @@ void AudioToTextWindow::backToMainMenu()
     
     // 返回主菜单前重置状态
     resetState();
-    std::cout << "[DEBUG] AudioToTextWindow backToMainMenu completed" << std::endl;
+    std::cout << "[UI][DEBUG] AudioToTextWindow backToMainMenu completed" << std::endl;
     emit backToMainMenuRequested();
 }
 
 void AudioToTextWindow::closeEvent(QCloseEvent *event)
 {
-    std::cout << "[DEBUG] AudioToTextWindow closeEvent called (begin)" << std::endl;
+    std::cout << "[UI][DEBUG] AudioToTextWindow closeEvent called (begin)" << std::endl;
     // 停止媒体播放器
     if (mediaPlayer_) {
         mediaPlayer_->stop();
     }
     // 停止 ASR 识别线程
     if (asrManager_) {
-        std::cout << "[DEBUG] Stopping ASR recognition in closeEvent..." << std::endl;
+        std::cout << "[UI][DEBUG] Stopping ASR recognition in closeEvent..." << std::endl;
         asrManager_->stopRecognition();
-        std::cout << "[DEBUG] ASR recognition stopped in closeEvent" << std::endl;
+        std::cout << "[UI][DEBUG] ASR recognition stopped in closeEvent" << std::endl;
     }
     // 断开 ASR 连接
     if (asrManager_) {
-        std::cout << "[DEBUG] Disconnecting ASR in closeEvent..." << std::endl;
+        std::cout << "[UI][DEBUG] Disconnecting ASR in closeEvent..." << std::endl;
         asrManager_->disconnect();
-        std::cout << "[DEBUG] ASR disconnected in closeEvent" << std::endl;
+        std::cout << "[UI][DEBUG] ASR disconnected in closeEvent" << std::endl;
     }
     
     // 关闭ASR线程
@@ -840,40 +881,63 @@ void AudioToTextWindow::closeEvent(QCloseEvent *event)
     
     // 清理音频转换器
     if (audioConverter_) {
-        std::cout << "[DEBUG] Stopping audio conversion in closeEvent..." << std::endl;
+        std::cout << "[UI][DEBUG] Stopping audio conversion in closeEvent..." << std::endl;
         audioConverter_->stopConversion();
-        std::cout << "[DEBUG] Audio conversion stopped in closeEvent" << std::endl;
+        std::cout << "[UI][DEBUG] Audio conversion stopped in closeEvent" << std::endl;
     }
     // 接受关闭事件
     event->accept();
-    std::cout << "[DEBUG] AudioToTextWindow closeEvent completed" << std::endl;
+    std::cout << "[UI][DEBUG] AudioToTextWindow closeEvent completed" << std::endl;
 }
 
-// 新增：重置界面和数据状态的方法
+// =================================================================================
+// 重置界面和数据状态的方法
+// =================================================================================
+/**
+ * @brief 重置窗口状态到初始状态
+ * 
+ * 该方法用于将AudioToTextWindow的所有状态重置为初始值，包括：
+ * 1. 清空文本编辑器内容
+ * 2. 清空文件列表（输入文件和工作文件）
+ * 3. 重置媒体播放器状态
+ * 4. 重置播放控件状态
+ * 5. 清空ASR回调中的文本内容
+ * 
+ * @note 该方法在构造函数中被调用，确保窗口初始状态一致
+ * @note 在返回主菜单时也会被调用，确保下次进入时状态干净
+ * @note 所有UI组件的状态都会被重置，但不会销毁组件本身
+ */
 void AudioToTextWindow::resetState()
 {
-    // 清空文本编辑框
+    // 步骤1: 清空文本编辑框，移除所有显示内容
     if (textEdit_) {
         textEdit_->clear();
     }
-    // 清空文件列表
-    inputFiles_.clear();
-    workFiles_.clear();
-    hasWorkFiles_ = false;
-    // 重置播放控件
+    
+    // 步骤2: 清空文件列表，释放内存
+    inputFiles_.clear();     // 清空原始输入文件列表
+    workFiles_.clear();      // 清空转换后的工作文件列表
+    hasWorkFiles_ = false;   // 重置工作文件标志
+    
+    // 步骤3: 重置媒体播放器状态
     if (mediaPlayer_) {
-        mediaPlayer_->stop();
-        mediaPlayer_->setSource(QUrl());
+        mediaPlayer_->stop();        // 停止当前播放
+        mediaPlayer_->setSource(QUrl()); // 清空媒体源
     }
+    
+    // 步骤4: 重置播放控件状态
     if (playbackSlider_) {
-        playbackSlider_->setValue(0);
-        playbackSlider_->setEnabled(false);
+        playbackSlider_->setValue(0);    // 重置进度条到起始位置
+        playbackSlider_->setEnabled(false); // 禁用进度条
     }
     if (timeLabel_) {
-        timeLabel_->setText("00:00 / 00:00");
+        timeLabel_->setText("00:00 / 00:00"); // 重置时间显示
     }
+    
+    // 步骤5: 更新播放控件可用状态（基于hasWorkFiles_标志）
     updatePlaybackControls();
-    // 清空ASR回调内容
+    
+    // 步骤6: 清空ASR回调中的文本内容，确保下次识别时从空白开始
     if (asrCallback_) {
         asrCallback_->clearText();
     }

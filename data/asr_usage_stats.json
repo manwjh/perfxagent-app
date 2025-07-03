@@ -1,34 +1,27 @@
 {
   "daily_stats": [
     {
-      "date": "2025-06-27",
-      "session_count": 2,
+      "date": "2025-07-03",
+      "session_count": 1,
       "sessions": [
         {
-          "connect_time": "2025-06-27 12:49:53",
-          "disconnect_time": "2025-06-27 12:53:32",
-          "duration_ms": 219302,
+          "connect_time": "2025-07-03 15:57:47",
+          "disconnect_time": "2025-07-03 15:58:48",
+          "duration_ms": 61583,
           "is_completed": true,
-          "session_id": "session-197afb87ff0-10d63af1"
-        },
-        {
-          "connect_time": "2025-06-27 12:53:38",
-          "disconnect_time": "2025-06-27 12:53:44",
-          "duration_ms": 5919,
-          "is_completed": true,
-          "session_id": "session-197afbbf02c-52508f28"
+          "session_id": "session-197cf4aadb8-60b7acd9"
         }
       ],
-      "total_duration_ms": 225221
+      "total_duration_ms": 61583
     }
   ],
-  "last_updated": "2025-06-27",
+  "last_updated": "2025-07-03",
   "overall_stats": {
     "active_days": 1,
-    "first_usage": "2025-06-27 12:49:53",
-    "last_usage": "2025-06-27 12:53:44",
-    "total_duration_ms": 225221,
-    "total_session_count": 2
+    "first_usage": "2025-07-03 15:57:47",
+    "last_usage": "2025-07-03 15:58:48",
+    "total_duration_ms": 61583,
+    "total_session_count": 1
   },
   "version": "1.0"
 }

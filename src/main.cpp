@@ -14,34 +14,30 @@
 #include "../include/ui/input_method_manager.h"
 
 int main(int argc, char *argv[]) {
-    // 在QApplication创建之前设置环境变量
+    // 设置环境变量
     qputenv("IMKCFRunLoopWakeUpReliable", "0");
-    qputenv("QT_MAC_WANTS_LAYER", "1");
     qputenv("QT_MAC_DISABLE_IMK", "0");
-    
-    // 在macOS上设置额外的属性（移除已弃用的高DPI属性）
-#ifdef Q_OS_MAC
-    QApplication::setAttribute(Qt::AA_DontShowIconsInMenus, false);
-    QApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
-#endif
     
     QApplication app(argc, argv);
     
+    // 全局样式表：统一弹窗、按钮、标签风格
+    app.setStyleSheet(
+        "QMessageBox { background: #f5f6fa; }"
+        "QLabel { color: #222; font-size: 18px; font-weight: 600; }"
+        "QPushButton {"
+        "  background: #FF8C00;"
+        "  color: white;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "  padding: 8px 24px;"
+        "  font-size: 16px;"
+        "  font-weight: 700;"
+        "}"
+        "QPushButton:hover { background: #FF6B35; }"
+    );
+    
     // 初始化输入法管理器
     perfx::ui::InputMethodManager::instance()->initialize();
-    
-    qDebug() << "QResource test:" << QResource(":/resources/icons/audio_file.png").isValid();
-    QDir dir(":/resources/icons");
-    qDebug() << "Resource list:" << dir.entryList();
-    
-    // 测试ASR管理器单例模式
-    qDebug() << "=== 测试ASR管理器单例模式 ===";
-    Asr::AsrManager& instance1 = Asr::AsrManager::instance();
-    Asr::AsrManager& instance2 = Asr::AsrManager::instance();
-    qDebug() << "实例1地址:" << &instance1;
-    qDebug() << "实例2地址:" << &instance2;
-    qDebug() << "是否为同一实例:" << (&instance1 == &instance2 ? "是" : "否");
-    qDebug() << "=== 单例模式测试完成 ===";
     
     try {
         perfx::ui::MainWindow w;

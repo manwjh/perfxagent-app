@@ -59,8 +59,8 @@ private:
     // 项目信息
     struct ProjectInfo {
         QString softwareName = "PerfXAgent-ASR";
-        QString description = "这是一款关于AI音频应用的程序，99%的代码由AI生成";
-        QString version = "1.7.0";
+        QString description = "大模型AI时代，如何成为创新的超级个体/小组织呢？于是我试了试！这是一款关于AI音频应用的程序，99%的代码由AI生成，代码全部开源，提示词全部开源。期待你的参与、使用，并提出建议。";
+        QString version = "1.8.0";
         QString author = "深圳王哥";
         QString githubUrl = "https://github.com/manwjh/perfxagent-app";
         QString email = "manwjh@126.com";

@@ -29,34 +29,14 @@ InputMethodManager* InputMethodManager::instance() {
 }
 
 void InputMethodManager::initialize() {
-    qDebug() << "[InputMethodManager] Initializing...";
-    
     // 设置环境变量
     setupEnvironmentVariables();
-    
-    // 设置应用程序属性
-    setupApplicationAttributes();
-    
-    qDebug() << "[InputMethodManager] Initialization completed";
 }
 
 void InputMethodManager::setupEnvironmentVariables() {
     // 抑制IMK相关的警告信息
     qputenv("IMKCFRunLoopWakeUpReliable", "0");
-    qputenv("QT_MAC_WANTS_LAYER", "1");
     qputenv("QT_MAC_DISABLE_IMK", "0");
-    
-    qDebug() << "[InputMethodManager] Environment variables set";
-}
-
-void InputMethodManager::setupApplicationAttributes() {
-    // 在macOS上设置额外的属性（移除已弃用的高DPI属性）
-#ifdef Q_OS_MAC
-    QApplication::setAttribute(Qt::AA_DontShowIconsInMenus, false);
-    QApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
-#endif
-    
-    qDebug() << "[InputMethodManager] Application attributes set";
 }
 
 void InputMethodManager::optimizeWindow(QWidget* window) {
@@ -65,14 +45,6 @@ void InputMethodManager::optimizeWindow(QWidget* window) {
     // 设置窗口属性以优化输入法处理
     window->setAttribute(Qt::WA_InputMethodEnabled, true);
     window->setAttribute(Qt::WA_InputMethodTransparent, false);
-    
-    // 在macOS上设置额外的窗口属性
-#ifdef Q_OS_MAC
-    window->setAttribute(Qt::WA_MacShowFocusRect, false);
-    window->setAttribute(Qt::WA_MacNormalSize, true);
-#endif
-    
-    qDebug() << "[InputMethodManager] Window optimized:" << window->objectName();
 }
 
 void InputMethodManager::optimizeInputWidget(QWidget* inputWidget) {
@@ -80,7 +52,6 @@ void InputMethodManager::optimizeInputWidget(QWidget* inputWidget) {
     
     if (isInputWidget(inputWidget)) {
         applyInputWidgetOptimization(inputWidget);
-        qDebug() << "[InputMethodManager] Input widget optimized:" << inputWidget->objectName();
     }
 }
 
@@ -88,7 +59,6 @@ void InputMethodManager::optimizeAllInputWidgets(QWidget* window) {
     if (!window) return;
     
     optimizeInputWidgetsRecursive(window);
-    qDebug() << "[InputMethodManager] All input widgets optimized for window:" << window->objectName();
 }
 
 void InputMethodManager::optimizeInputWidgetsRecursive(QWidget* widget) {
@@ -122,11 +92,6 @@ void InputMethodManager::applyInputWidgetOptimization(QWidget* widget) {
     // 设置输入控件属性
     widget->setAttribute(Qt::WA_InputMethodEnabled, true);
     widget->setAttribute(Qt::WA_InputMethodTransparent, false);
-    
-    // 在macOS上设置焦点处理
-#ifdef Q_OS_MAC
-    widget->setAttribute(Qt::WA_MacShowFocusRect, true);
-#endif
 }
 
 } // namespace ui

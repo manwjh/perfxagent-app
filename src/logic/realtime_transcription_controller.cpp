@@ -582,7 +582,18 @@ void RealtimeAsrCallback::onMessage(Asr::AsrClient* client, const std::string& m
             emit controller_->asrUtterancesUpdated(utterList);
         } else if (resultObj.contains("text")) {
             QString text = resultObj["text"].toString();
-            bool isFinal = resultObj.contains("is_final") ? resultObj.value("is_final").toBool() : false;
+            
+            // 检查是否为最终结果（通过definite字段或协议标志判断）
+            bool isFinal = false;
+            if (resultObj.contains("result") && resultObj["result"].toObject().contains("utterances")) {
+                QJsonArray utterances = resultObj["result"].toObject()["utterances"].toArray();
+                for (const QJsonValue& utterance : utterances) {
+                    if (utterance.toObject().contains("definite") && utterance.toObject()["definite"].toBool()) {
+                        isFinal = true;
+                        break;
+                    }
+                }
+            }
             
             // 如果是最终结果，累积转录文本
             if (isFinal && !text.isEmpty()) {
@@ -613,110 +624,59 @@ void RealtimeAsrCallback::onError(Asr::AsrClient* client, const std::string& err
 
 void RealtimeTranscriptionController::enableRealtimeAsr(bool enable) {
     try {
-        realtimeAsrEnabled_ = enable;
-        std::cout << "[DEBUG] Realtime ASR enabled: " << (enable ? "true" : "false") << std::endl;
+        std::lock_guard<std::mutex> lock(asrMutex_);
         
-        if (enable && realtimeAsrManager_) {
-            // **关键修复：配置正确的音频格式和连接参数**
-            Asr::AsrConfig asrConfig = realtimeAsrManager_->getConfig();
-            asrConfig.sampleRate = 16000;
-            asrConfig.channels = 1;
-            asrConfig.format = "pcm";  // 实时流使用pcm格式
-            asrConfig.codec = "raw";   // 编码格式为raw(pcm)
-            asrConfig.streaming = true;
-            asrConfig.segDuration = 100;  // 100ms分包
-            asrConfig.enableBusinessLog = false;  // 禁用业务日志以减少输出
-            asrConfig.enableFlowLog = false;      // 禁用流程日志以减少输出
-            realtimeAsrManager_->setConfig(asrConfig);
-            
-            // **关键修复：确保先连接再启动识别**
-            std::cout << "[DEBUG] Attempting to connect to ASR service..." << std::endl;
-            
-            // 添加重连机制
-            int retryCount = 0;
-            const int maxRetries = 3;
-            bool connected = false;
-            
-            while (retryCount < maxRetries && !connected) {
-                try {
-                    if (realtimeAsrManager_->connect()) {
-                        connected = true;
-                        std::cout << "[DEBUG] ASR connection successful on attempt " << (retryCount + 1) << std::endl;
-                    } else {
-                        retryCount++;
-                        std::cout << "[WARNING] ASR connection failed, attempt " << retryCount << "/" << maxRetries << std::endl;
-                        if (retryCount < maxRetries) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // 等待1秒后重试
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    retryCount++;
-                    std::cerr << "[ERROR] Exception during ASR connection attempt " << retryCount << ": " << e.what() << std::endl;
-                    if (retryCount < maxRetries) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                    }
-                } catch (...) {
-                    retryCount++;
-                    std::cerr << "[ERROR] Unknown exception during ASR connection attempt " << retryCount << std::endl;
-                    if (retryCount < maxRetries) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                    }
-                }
-            }
-            
-            if (!connected) {
-                std::cerr << "[ERROR] Failed to connect to ASR service after " << maxRetries << " attempts" << std::endl;
-                emit asrError("Failed to connect to ASR service after multiple attempts");
-                realtimeAsrEnabled_ = false; // 重置状态
-                return;
-            }
-            
-            // 等待连接稳定
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            
-            // 检查连接状态
-            if (!realtimeAsrManager_->isConnected()) {
-                std::cerr << "[ERROR] ASR connection not stable" << std::endl;
-                emit asrError("ASR connection not stable");
-                realtimeAsrEnabled_ = false; // 重置状态
-                return;
-            }
-            
-            // 启动流式识别会话
-            std::cout << "[DEBUG] Starting ASR streaming recognition..." << std::endl;
-            if (realtimeAsrManager_->startRecognition()) {
-                std::cout << "[DEBUG] ASR streaming recognition started successfully" << std::endl;
-                emit onAsrConnectionStatusChanged(true);
-            } else {
-                std::cerr << "[ERROR] Failed to start ASR streaming recognition" << std::endl;
-                emit asrError("Failed to start ASR streaming recognition");
-                realtimeAsrManager_->disconnect();
-                realtimeAsrEnabled_ = false; // 重置状态
-            }
-        } else if (!enable && realtimeAsrManager_) {
-            // 停止流式识别
-            std::cout << "[DEBUG] Stopping ASR streaming recognition..." << std::endl;
-            try {
-                realtimeAsrManager_->stopRecognition();
-                realtimeAsrManager_->disconnect();
-                std::cout << "[DEBUG] ASR streaming recognition stopped" << std::endl;
-                emit onAsrConnectionStatusChanged(false);
-            } catch (const std::exception& e) {
-                std::cerr << "[ERROR] Exception while stopping ASR: " << e.what() << std::endl;
-                emit asrError(QString("Exception while stopping ASR: %1").arg(e.what()));
-            } catch (...) {
-                std::cerr << "[ERROR] Unknown exception while stopping ASR" << std::endl;
-                emit asrError("Unknown exception while stopping ASR");
-            }
+        if (enable == realtimeAsrEnabled_) {
+            return; // 状态没有变化
         }
+        
+        if (enable) {
+            // 启用实时ASR
+            if (!realtimeAsrManager_) {
+                std::cout << "[ERROR] ASR manager not available" << std::endl;
+                emit asrError("ASR manager not available");
+                return;
+            }
+            
+            // 确保ASR线程已启动
+            if (!realtimeAsrManager_->isAsrThreadRunning()) {
+                realtimeAsrManager_->startAsrThread();
+            }
+            
+            // 关键修复：在发送音频数据之前，先发送Full Client Request
+            if (!realtimeAsrManager_->startRecognition()) {
+                std::cout << "[ERROR] Failed to start ASR recognition" << std::endl;
+                emit asrError("Failed to start ASR recognition");
+                return;
+            }
+            
+            realtimeAsrEnabled_ = true;
+            std::cout << "[INFO] Real-time ASR enabled" << std::endl;
+            emit onAsrConnectionStatusChanged(true);
+            
+        } else {
+            // 禁用实时ASR
+            realtimeAsrEnabled_ = false;
+            
+            // 停止ASR识别
+            if (realtimeAsrManager_) {
+                realtimeAsrManager_->stopRecognition();
+            }
+            
+            // 清空音频缓冲区
+            asrAudioBuffer_.clear();
+            asrBufferSize_ = 0;
+            
+            std::cout << "[INFO] Real-time ASR disabled" << std::endl;
+            emit onAsrConnectionStatusChanged(false);
+        }
+        
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] Exception in enableRealtimeAsr: " << e.what() << std::endl;
         emit asrError(QString("Exception in enableRealtimeAsr: %1").arg(e.what()));
-        realtimeAsrEnabled_ = false; // 重置状态
     } catch (...) {
         std::cerr << "[ERROR] Unknown exception in enableRealtimeAsr" << std::endl;
         emit asrError("Unknown exception in enableRealtimeAsr");
-        realtimeAsrEnabled_ = false; // 重置状态
     }
 }
 

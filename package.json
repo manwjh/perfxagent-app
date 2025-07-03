@@ -1,6 +1,6 @@
 {
   "name": "perfxagent-app",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "PerfXAgent客户端应用程序",
   "main": "src/main.js",
   "scripts": {
